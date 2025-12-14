@@ -1,0 +1,10 @@
+[tool.python]
+version = "3.9"
+
+[project]
+name = "carbon-credit-backend"
+version = "1.0.0"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+
