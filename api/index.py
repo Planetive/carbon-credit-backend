@@ -11,5 +11,9 @@ from mangum import Mangum
 from fastapi_app.main import app
 
 # Create ASGI handler for Vercel
-# Use explicit handler creation to avoid Python 3.12 compatibility issues
-handler = Mangum(app, lifespan="off", api_gateway_base_path="")
+# Wrap in a function to avoid Vercel's handler inspection issues
+_mangum_handler = Mangum(app, lifespan="off", api_gateway_base_path="")
+
+def handler(event, context):
+    """Vercel serverless function handler"""
+    return _mangum_handler(event, context)
