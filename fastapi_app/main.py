@@ -152,10 +152,30 @@ def finance_emission(req: FinanceEmissionRequest) -> FinanceEmissionResponse:
         company_type = CompanyType.LISTED if req.company_type == "listed" else CompanyType.PRIVATE
         
         # Perform calculation
-        result = get_calculation_engine().calculate(
+        calc_result = get_calculation_engine().calculate(
             formula_id=req.formula_id,
             inputs=req.inputs,
             company_type=company_type
+        )
+        
+        # Convert finance_models.CalculationResult to models.CalculationResult
+        # The difference is calculation_steps: List[CalculationStep] vs List[Dict[str, Any]]
+        from .models import CalculationResult as ModelsCalculationResult
+        result = ModelsCalculationResult(
+            attribution_factor=calc_result.attribution_factor,
+            emission_factor=calc_result.emission_factor,
+            financed_emissions=calc_result.financed_emissions,
+            data_quality_score=calc_result.data_quality_score,
+            methodology=calc_result.methodology,
+            calculation_steps=[
+                {
+                    "step": step.step,
+                    "value": step.value,
+                    "formula": step.formula
+                }
+                for step in calc_result.calculation_steps
+            ],
+            metadata=calc_result.metadata
         )
         
         # Convert result to response format
@@ -188,10 +208,30 @@ def facilitated_emission(req: FacilitatedEmissionRequest) -> FacilitatedEmission
         company_type = CompanyType.LISTED if req.company_type == "listed" else CompanyType.PRIVATE
         
         # Perform calculation
-        result = get_calculation_engine().calculate(
+        calc_result = get_calculation_engine().calculate(
             formula_id=req.formula_id,
             inputs=req.inputs,
             company_type=company_type
+        )
+        
+        # Convert finance_models.CalculationResult to models.CalculationResult
+        # The difference is calculation_steps: List[CalculationStep] vs List[Dict[str, Any]]
+        from .models import CalculationResult as ModelsCalculationResult
+        result = ModelsCalculationResult(
+            attribution_factor=calc_result.attribution_factor,
+            emission_factor=calc_result.emission_factor,
+            financed_emissions=calc_result.financed_emissions,
+            data_quality_score=calc_result.data_quality_score,
+            methodology=calc_result.methodology,
+            calculation_steps=[
+                {
+                    "step": step.step,
+                    "value": step.value,
+                    "formula": step.formula
+                }
+                for step in calc_result.calculation_steps
+            ],
+            metadata=calc_result.metadata
         )
         
         # Convert result to response format
