@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from .models import (
     HealthResponse,
@@ -14,6 +14,7 @@ from .scenario_engine import ScenarioEngine
 from .database import test_connection, get_supabase_client
 from .finance_models import CompanyType
 import logging
+import os
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -22,29 +23,79 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Finance Emission Service", version="0.1.0")
 
-# CORS configuration: explicit origins to support credentials and avoid "*" with cookies
-ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:8080",
-    "http://127.0.0.1:8080",
+# CORS configuration - allow frontend domain and local development
+# When allow_credentials=True, you cannot use allow_origins=["*"]
+# Must specify exact origins
+# Can be overridden with ALLOWED_ORIGINS environment variable (comma-separated)
+default_origins = [
     "https://www.rethinkcarbon.io",
     "https://rethinkcarbon.io",
+    "http://localhost:5173",  # Vite dev server
+    "http://localhost:3000",  # Alternative dev port
+    "http://localhost:8080",  # Local dev server
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:8080",
+    "http://localhost:8000",  # Local backend (for testing)
+    "http://127.0.0.1:8000",  # Local backend (for testing)
 ]
 
+# Add Vercel preview URLs pattern support via regex (handled separately)
+# Vercel preview URLs look like: https://project-name-xyz123.vercel.app
+
+# Get allowed origins from environment variable or use defaults
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+if allowed_origins_env:
+    allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
+else:
+    allowed_origins = default_origins
+
+logger.info(f"CORS allowed origins: {allowed_origins}")
+
+# Add CORS middleware - MUST be added before routes
+# For Vercel serverless functions, explicit CORS configuration is critical
+# Note: When allow_credentials=True, allow_headers must be explicit, not ["*"]
+# Using both allow_origins (explicit list) and allow_origin_regex (for localhost and Vercel preview URLs)
+# This ensures production domains work while allowing any localhost port for development
+# and Vercel preview deployments
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # public API; no cookies are used
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=allowed_origins,  # Explicit list of allowed origins
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?|https://.*\.vercel\.app",  # Allow localhost and Vercel preview URLs
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+        "Access-Control-Request-Method",
+        "Access-Control-Request-Headers",
+    ],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 # Bank portfolio management removed - keeping simple individual company approach
 
-# Initialize the calculation engines
-calculation_engine = CalculationEngine()
-scenario_engine = ScenarioEngine()
+# Initialize the calculation engines lazily to avoid crashes during import
+calculation_engine = None
+scenario_engine = None
+
+def get_calculation_engine():
+    """Lazy initialization of calculation engine"""
+    global calculation_engine
+    if calculation_engine is None:
+        calculation_engine = CalculationEngine()
+    return calculation_engine
+
+def get_scenario_engine():
+    """Lazy initialization of scenario engine"""
+    global scenario_engine
+    if scenario_engine is None:
+        scenario_engine = ScenarioEngine()
+    return scenario_engine
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -101,7 +152,7 @@ def finance_emission(req: FinanceEmissionRequest) -> FinanceEmissionResponse:
         company_type = CompanyType.LISTED if req.company_type == "listed" else CompanyType.PRIVATE
         
         # Perform calculation
-        result = calculation_engine.calculate(
+        result = get_calculation_engine().calculate(
             formula_id=req.formula_id,
             inputs=req.inputs,
             company_type=company_type
@@ -137,7 +188,7 @@ def facilitated_emission(req: FacilitatedEmissionRequest) -> FacilitatedEmission
         company_type = CompanyType.LISTED if req.company_type == "listed" else CompanyType.PRIVATE
         
         # Perform calculation
-        result = calculation_engine.calculate(
+        result = get_calculation_engine().calculate(
             formula_id=req.formula_id,
             inputs=req.inputs,
             company_type=company_type
@@ -161,37 +212,57 @@ def facilitated_emission(req: FacilitatedEmissionRequest) -> FacilitatedEmission
         raise HTTPException(status_code=500, detail="Internal calculation error")
 
 
+@app.options("/scenario/calculate")
+def options_scenario():
+    """Handle OPTIONS preflight requests for scenario endpoint"""
+    logger.info("OPTIONS preflight request received for /scenario/calculate")
+    return {"message": "OK"}
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all incoming requests for debugging CORS and request flow"""
+    origin = request.headers.get("origin", "No origin header")
+    logger.info(f"Request: {request.method} {request.url.path} - Origin: {origin}")
+    response = await call_next(request)
+    # Log CORS headers in response
+    cors_origin = response.headers.get("access-control-allow-origin", "Not set")
+    logger.info(f"Response: {request.method} {request.url.path} - Status: {response.status_code} - CORS Origin: {cors_origin}")
+    return response
+
+
 @app.post("/scenario/calculate", response_model=ScenarioResponse)
 def calculate_scenario(req: ScenarioRequest) -> ScenarioResponse:
     """
     Calculate climate stress testing scenarios using sector-specific multipliers
     """
     try:
-        logger.info(f"Calculating {req.scenario_type} scenario for {len(req.portfolio_entries)} portfolio entries")
+        logger.info(f"POST /scenario/calculate - Calculating {req.scenario_type} scenario for {len(req.portfolio_entries)} portfolio entries")
         
         # Validate portfolio entries
         if not req.portfolio_entries:
+            logger.warning("POST /scenario/calculate - Empty portfolio entries received")
             raise ValueError("Portfolio entries cannot be empty")
         
         # Perform scenario calculation
-        result = scenario_engine.calculate_scenario(
+        result = get_scenario_engine().calculate_scenario(
             portfolio_entries=req.portfolio_entries,
             scenario_type=req.scenario_type
         )
         
         if not result.success:
+            logger.error(f"POST /scenario/calculate - Scenario calculation failed: {result.error}")
             raise ValueError(result.error or "Scenario calculation failed")
         
-        logger.info(f"Scenario calculation completed successfully. Total loss increase: {result.total_loss_increase_percentage:.2f}%")
+        logger.info(f"POST /scenario/calculate - Success! Total loss increase: {result.total_loss_increase_percentage:.2f}%")
         return result
         
     except ValueError as e:
-        logger.error(f"Validation error in scenario calculation: {str(e)}")
+        logger.error(f"POST /scenario/calculate - Validation error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Internal error in scenario calculation: {str(e)}")
+        logger.error(f"POST /scenario/calculate - Internal error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal scenario calculation error")
 
 
 # Local dev entrypoint: uvicorn backend.fastapi_app.main:app --reload
-
