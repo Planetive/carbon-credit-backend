@@ -1,0 +1,243 @@
+{
+  "_comment": "SPA MobileFuel / OnRoad / NonRoad / HeatSteam / Waste / UK passenger+delivery. Never change formulas to pass.",
+  "mobile_fuel": [
+    {
+      "id": "mobile_gallon",
+      "quantity": 10,
+      "factor": 8.78,
+      "unit": "kg CO2/gallon",
+      "input_unit": "gallon",
+      "expected_emissions_kg": 87.8
+    },
+    {
+      "id": "mobile_liter_to_gallon",
+      "quantity": 10,
+      "factor": 8.78,
+      "unit": "kg CO2/gallon",
+      "input_unit": "liter",
+      "expected_emissions_kg": 23.194317
+    },
+    {
+      "id": "mobile_map_lookup",
+      "sheet_rows": [
+        {
+          "Fuel Type": "Motor Gasoline",
+          "Unit": "gallon",
+          "kg CO2 per unit": 8.78
+        }
+      ],
+      "quantity": 5,
+      "fuel_type": "Motor Gasoline",
+      "input_unit": "gallon",
+      "expected_emissions_kg": 43.9
+    }
+  ],
+  "on_road_gasoline": [
+    {
+      "id": "onroad_ch4_100mi",
+      "distance": 100,
+      "distance_unit": "mile",
+      "ch4_g_per_mile": 0.019,
+      "emission_selection": "ch4_only",
+      "expected_emissions_kg": 0.0019
+    },
+    {
+      "id": "onroad_n2o_100mi",
+      "distance": 100,
+      "distance_unit": "mile",
+      "n2o_g_per_mile": 0.018,
+      "emission_selection": "n2o_only",
+      "expected_emissions_kg": 0.0018
+    },
+    {
+      "id": "onroad_ch4_100km",
+      "distance": 100,
+      "distance_unit": "km",
+      "ch4_g_per_mile": 0.019,
+      "emission_selection": "ch4_only",
+      "expected_emissions_kg": 0.0011806049
+    },
+    {
+      "id": "onroad_map_lookup",
+      "sheet_rows": [
+        {
+          "Vehicle Type": "Passenger Cars",
+          "Model Year": "2020",
+          "CH4 Factor": 0.019,
+          "N2O Factor": 0.018
+        }
+      ],
+      "distance": 50,
+      "vehicle_type": "Passenger Cars",
+      "model_year": "2020",
+      "emission_selection": "ch4_only",
+      "expected_emissions_kg": 0.00095
+    }
+  ],
+  "on_road_diesel": [
+    {
+      "id": "diesel_ch4_explicit",
+      "distance": 200,
+      "distance_unit": "mile",
+      "ch4_g_per_mile": 0.0051,
+      "emission_selection": "ch4",
+      "expected_emissions_kg": 0.00102
+    },
+    {
+      "id": "diesel_map_with_fuel",
+      "sheet_rows": [
+        {
+          "Vehicle Type": "Medium-Duty Truck",
+          "Fuel Type": "Diesel",
+          "CH4 Factor": 0.0051,
+          "N2O Factor": 0.0048
+        }
+      ],
+      "distance": 100,
+      "vehicle_type": "Medium-Duty Truck",
+      "fuel_type": "Diesel",
+      "emission_selection": "n2o",
+      "expected_emissions_kg": 0.00048
+    }
+  ],
+  "non_road": [
+    {
+      "id": "nonroad_gallon_ch4",
+      "quantity": 10,
+      "unit": "gallon",
+      "ch4_g_per_gallon": 1.0,
+      "emission_selection": "ch4",
+      "expected_emissions_kg": 0.01
+    },
+    {
+      "id": "nonroad_liter_ch4",
+      "quantity": 10,
+      "unit": "liter",
+      "ch4_g_per_gallon": 1.0,
+      "emission_selection": "ch4",
+      "expected_emissions_kg": 0.0026417217685798895
+    }
+  ],
+  "heat_steam": [
+    {
+      "id": "heat_co2_mmbtu",
+      "quantity": 10,
+      "gas": "co2",
+      "co2_factor": 53.06,
+      "unit": "mmBtu",
+      "expected_emissions_kg": 530.6
+    },
+    {
+      "id": "heat_ch4_mmbtu",
+      "quantity": 10,
+      "gas": "ch4",
+      "ch4_factor": 1.0,
+      "unit": "mmBtu",
+      "expected_emissions_kg": 0.01
+    },
+    {
+      "id": "heat_mmscf_to_mmbtu",
+      "quantity": 1,
+      "quantity_unit": "mmscf",
+      "gas": "co2",
+      "co2_factor": 53.06,
+      "unit": "mmBtu",
+      "expected_emissions_kg": 55023.22
+    },
+    {
+      "id": "heat_map_lookup",
+      "sheet_rows": [
+        {
+          "Type": "Steam and Heat",
+          "Unit": "mmBtu",
+          "kg CO2 / mmBtu": 66.33,
+          "g CH4 / mmBtu": 1.25,
+          "g N2O / mmBtu": 0.1
+        }
+      ],
+      "quantity": 2,
+      "gas": "co2",
+      "entry_type": "Steam and Heat",
+      "expected_emissions_kg": 132.66
+    }
+  ],
+  "waste": [
+    {
+      "id": "waste_explicit",
+      "volume": 100,
+      "disposal_method": "Landfilled",
+      "factor": 0.05,
+      "expected_emissions_kg": 5.0
+    },
+    {
+      "id": "waste_map_lookup",
+      "sheet_rows": [
+        {
+          " Material ": "Mixed Paper",
+          "Landfilled": 0.46,
+          "Recycled": 0.04,
+          "Combusted": "N/A"
+        }
+      ],
+      "volume": 10,
+      "material": "Mixed Paper",
+      "disposal_method": "Landfilled",
+      "expected_emissions_kg": 4.6
+    }
+  ],
+  "uk_passenger": [
+    {
+      "id": "passenger_explicit",
+      "distance": 50,
+      "factor": 0.17068,
+      "expected_emissions_kg": 8.534
+    },
+    {
+      "id": "passenger_map",
+      "sheet_rows": [
+        {
+          "Activity": "Cars (by size)",
+          "Type": "Average car",
+          "Unit": "km",
+          "Fuel Type": "Petrol",
+          "kg CO2e": 0.17068
+        }
+      ],
+      "distance": 100,
+      "activity": "Cars (by size)",
+      "vehicle_type": "Average car",
+      "unit": "km",
+      "fuel_type": "Petrol",
+      "uk_factor_basis": "total",
+      "expected_emissions_kg": 17.068
+    }
+  ],
+  "uk_delivery": [
+    {
+      "id": "delivery_explicit",
+      "distance": 100,
+      "factor": 0.88246,
+      "expected_emissions_kg": 88.246
+    },
+    {
+      "id": "delivery_map_laden",
+      "sheet_rows": [
+        {
+          "Activity": "Vans",
+          "Type": "Class III",
+          "Unit": "km",
+          "Fuel Type": "Diesel",
+          "laden_lev": "50%",
+          "kg CO2e": 0.25
+        }
+      ],
+      "distance": 40,
+      "activity": "Vans",
+      "vehicle_type": "Class III",
+      "unit": "km",
+      "fuel_type": "Diesel",
+      "laden_level": "50%",
+      "expected_emissions_kg": 10.0
+    }
+  ]
+}

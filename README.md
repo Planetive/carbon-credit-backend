@@ -32,7 +32,7 @@ See [SETUP.md](SETUP.md) for env vars and Railway notes.
 - GHG: `/api/v1/emission-assessments`, `/api/v1/emission-activities`
 - Financed: `/api/v1/financed-emissions`, `POST /api/v1/financed-emissions/calculate`
 - Factors (read-only, JWT): `/api/v1/factors/datasets`, `/api/v1/factors/rows`, `/api/v1/factors/sheets/{code}` — reads `ref.factor_datasets` / `ref.factor_rows` (legacy-shaped sheet via Factor Service)
-- Calc (JWT, SPA math parity): `/api/v1/calc/uk/fuel`, `/api/v1/calc/epa/fuel`, plus `/uk/passenger|delivery|refrigerant` — optional persist to `app.emission_activities` when `assessment_id` + `persist`
+- Calc (JWT, SPA math parity): `/api/v1/calc/uk/fuel`, `/epa/fuel`, `/uk/passenger|delivery|refrigerant`, `/epa/mobile-fuel`, `/epa/on-road-gasoline|diesel`, `/epa/non-road`, `/heat-steam`, `/waste` — optional persist to `app.emission_activities` when `assessment_id` + `persist`
 - Catalog (read-only, JWT): `/api/v1/catalog/country-emissions`, `global-projects`, `ccus-projects`, `bess`, `carbon-credit-markets`, … — missing tables return `[]`
 - Calc (stateless): `POST /finance-emission`, `POST /facilitated-emission`, `POST /scenario/calculate`
 
