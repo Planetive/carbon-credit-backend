@@ -25,6 +25,7 @@ from .routers.emission_assessments import router as emission_assessments_router
 from .routers.emission_activities import router as emission_activities_router
 from .routers.financed_emissions import router as financed_emissions_router
 from .routers.catalog import router as catalog_router
+from .routers.factors import router as factors_router
 import logging
 import os
 
@@ -45,6 +46,7 @@ app.include_router(emission_assessments_router, prefix="/api/v1")
 app.include_router(emission_activities_router, prefix="/api/v1")
 app.include_router(financed_emissions_router, prefix="/api/v1")
 app.include_router(catalog_router, prefix="/api/v1")
+app.include_router(factors_router, prefix="/api/v1")
 
 # CORS configuration - allow frontend domain and local development
 # When allow_credentials=True, you cannot use allow_origins=["*"]
