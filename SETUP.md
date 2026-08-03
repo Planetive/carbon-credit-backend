@@ -1,78 +1,76 @@
 # Backend Setup Guide
 
 ## Prerequisites
-- Python 3.8+
-- Your Supabase Service Role Key
+
+- Python 3.9+
+- Access to EC2 Postgres database `rethinkcarbon`
+- A strong `JWT_SECRET` for signing access tokens
 
 ## Installation
 
-### 1. Install Dependencies
+### 1. Install dependencies
+
 ```bash
-cd backend
 pip install -r requirements.txt
 ```
 
-### 2. Environment Configuration
-1. Copy the example environment file:
-   ```bash
-   cp .env.example .env
-   ```
+### 2. Environment configuration
 
-2. Get your Supabase Service Role Key:
-   - Go to your Supabase project dashboard
-   - Navigate to **Settings** → **API**
-   - Copy the **service_role** key (not the anon key)
-
-3. Update `.env` file:
-   ```env
-   SUPABASE_SERVICE_ROLE_KEY=your_actual_service_role_key_here
-   ```
-
-### 3. Test the Setup
 ```bash
-# Start the backend server
-uvicorn fastapi_app.main:app --reload --port 8000
+cp .env.example .env
+```
 
-# In another terminal, test the connection
+Required:
+
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | EC2 Postgres URL, e.g. `postgresql://postgres:PASSWORD@HOST:5432/rethinkcarbon` |
+| `JWT_SECRET` | Secret used to sign/verify JWTs |
+
+Optional:
+
+| Variable | Default / notes |
+|----------|-----------------|
+| `JWT_ALGORITHM` | `HS256` |
+| `JWT_EXPIRE_MINUTES` | `10080` (7 days) |
+| `ALLOWED_ORIGINS` | Comma-separated CORS origins |
+| `SUPABASE_SERVICE_ROLE_KEY` | Legacy fallback only for `/health` and `/test-db` |
+
+### 3. Auth SQL (once per database)
+
+Run against `rethinkcarbon` before using `/auth/signup`:
+
+```text
+fastapi_app/sql/001_auth_users_and_profiles.sql
+```
+
+Product schema migrations stay in the sibling frontend repo:
+
+```text
+carbon-credit-app-main/db/migrations
+```
+
+### 4. Run locally
+
+```bash
+uvicorn fastapi_app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Smoke checks:
+
+```bash
 curl http://localhost:8000/health
 curl http://localhost:8000/test-db
 ```
 
-## Expected Results
+## Railway
 
-### Health Check (`/health`)
-```json
-{
-  "status": "ok",
-  "engine_version": "pcaf-engine-0.1.0",
-  "database_status": "connected"
-}
-```
+- This repo is the deploy target. Start: `uvicorn fastapi_app.main:app --host 0.0.0.0 --port $PORT`
+- Set `DATABASE_URL` (EC2) and `JWT_SECRET` on the Railway service
+- Do **not** attach Railway Postgres; the app uses external EC2 Postgres
 
-### Database Test (`/test-db`)
-```json
-{
-  "status": "success",
-  "message": "Database connection successful",
-  "tables_accessible": true,
-  "sample_data_count": 0
-}
-```
+## Security notes
 
-## Troubleshooting
-
-### Database Connection Issues
-1. **Check Service Role Key**: Make sure you're using the `service_role` key, not the `anon` key
-2. **Environment Variables**: Ensure `.env` file is in the `backend/` directory
-3. **Network Access**: Verify your IP is allowed in Supabase settings
-
-### Common Errors
-- `SUPABASE_SERVICE_ROLE_KEY not set`: Check your `.env` file
-- `Database connection test failed`: Verify your service role key is correct
-- `Permission denied`: Ensure you're using the service role key, not anon key
-
-## Security Notes
-- ⚠️ **Never commit the `.env` file** to version control
-- The service role key bypasses Row Level Security (RLS)
-- Only use this key for backend operations
-- In production, use environment variables or secure key management
+- Never commit `.env`
+- `JWT_SECRET` must be long and random in production
+- `SUPABASE_SERVICE_ROLE_KEY` is optional legacy only; prefer `DATABASE_URL`

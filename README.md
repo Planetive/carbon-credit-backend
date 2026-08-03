@@ -1,38 +1,41 @@
-# Finance Emission FastAPI Service
+# Carbon Credit Backend (FastAPI)
 
-Minimal FastAPI backend to calculate Finance Emission and Facilitated Emission.
+Canonical FastAPI API for RethinkCarbon. Deployed on **Railway** (uvicorn). Postgres lives on **EC2** (`DATABASE_URL`) — Railway does not host the database.
 
-## Quickstart
+Auth is self-hosted JWT against `public.users` (not Supabase Auth). Product schema SQL migrations remain in the sibling app repo: `carbon-credit-app-main/db/migrations`. Auth bootstrap SQL is in `fastapi_app/sql/001_auth_users_and_profiles.sql`.
 
-1) Create venv and install deps
+## Quickstart (local)
 
 ```bash
 python -m venv .venv
-. .venv/Scripts/activate  # Windows PowerShell: . .venv/Scripts/Activate.ps1
-pip install -r backend/requirements.txt
+# Windows PowerShell:
+. .venv/Scripts/Activate.ps1
+pip install -r requirements.txt
+cp .env.example .env
+# Fill DATABASE_URL and JWT_SECRET in .env
+
+uvicorn fastapi_app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-2) Run dev server
-
-```bash
-uvicorn backend.fastapi_app.main:app --reload
-```
-
-3) Open docs
-
-- Swagger UI: http://localhost:8000/docs
+- Swagger: http://localhost:8000/docs
 - Health: http://localhost:8000/health
+- DB probe: http://localhost:8000/test-db
+- Auth: `POST /auth/signup`, `POST /auth/login`, `GET /auth/me`
 
-## Endpoints
+See [SETUP.md](SETUP.md) for env vars and Railway notes.
 
-- POST /finance-emission
-- POST /facilitated-emission
+## Endpoints (current)
 
-Request/response models are in `backend/fastapi_app/models.py`.
+- `GET /health`, `GET /test-db`
+- `POST /auth/signup`, `POST /auth/login`, `GET /auth/me`
+- `POST /finance-emission`, `POST /facilitated-emission`, `POST /scenario/calculate`
 
-## Notes
+## Deploy (Railway)
 
-- The engine currently contains placeholder logic; port the existing frontend formulas into `backend/fastapi_app/engine.py` to match results exactly.
-- Keep inputs in base units (tCO2e, PKR) on the server; do UI formatting client-side.
-- Consider adding authentication and proper CORS rules in production.
+Start command (already in `railway.json` / `Procfile` / `nixpacks.toml`):
 
+```text
+uvicorn fastapi_app.main:app --host 0.0.0.0 --port $PORT
+```
+
+Required Railway env vars: `DATABASE_URL`, `JWT_SECRET`. Optional: `JWT_ALGORITHM`, `JWT_EXPIRE_MINUTES`, `ALLOWED_ORIGINS`, `SUPABASE_SERVICE_ROLE_KEY` (legacy fallback).

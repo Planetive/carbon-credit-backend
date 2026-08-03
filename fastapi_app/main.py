@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from .models import (
     HealthResponse,
     FinanceEmissionRequest,
@@ -11,7 +12,9 @@ from .models import (
 )
 from .calculation_engine import CalculationEngine
 from .scenario_engine import ScenarioEngine
+from .auth_routes import router as auth_router
 from .database import test_connection, get_supabase_client
+from .db import engine as pg_engine, test_postgres_connection
 from .finance_models import CompanyType
 import logging
 import os
@@ -22,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 
 app = FastAPI(title="Finance Emission Service", version="0.1.0")
+
+app.include_router(auth_router, prefix="/auth", tags=["auth"])
 
 # CORS configuration - allow frontend domain and local development
 # When allow_credentials=True, you cannot use allow_origins=["*"]
@@ -100,8 +105,11 @@ def get_scenario_engine():
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    # Test database connection
-    db_status = "connected" if test_connection() else "disconnected"
+    # Prefer self-hosted Postgres when DATABASE_URL is set; else legacy Supabase probe
+    if test_postgres_connection():
+        db_status = "connected"
+    else:
+        db_status = "connected" if test_connection() else "disconnected"
     return HealthResponse(
         status="ok", 
         engine_version="1.0.0",
@@ -118,25 +126,48 @@ def root():
 @app.get("/test-db")
 def test_database():
     """
-    Test database connection endpoint
-    Returns detailed connection status
+    Test database connection endpoint.
+    Prefers EC2 Postgres (DATABASE_URL); falls back to legacy Supabase client.
     """
+    if pg_engine is not None:
+        try:
+            with pg_engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+                profiles_count = None
+                try:
+                    profiles_count = conn.execute(
+                        text("SELECT COUNT(*) FROM public.profiles")
+                    ).scalar()
+                except Exception:
+                    # profiles table may not exist yet on a fresh DB
+                    pass
+            return {
+                "status": "success",
+                "backend": "postgres",
+                "message": "Postgres connection successful",
+                "tables_accessible": True,
+                "profiles_count": profiles_count,
+            }
+        except Exception as e:
+            logger.warning(f"Postgres test-db failed, trying Supabase fallback: {e}")
+
+    # Legacy Supabase fallback
     try:
         client = get_supabase_client()
-        # Test with a simple query
         result = client.table("profiles").select("id").limit(1).execute()
-        
+
         return {
             "status": "success",
-            "message": "Database connection successful",
+            "backend": "supabase",
+            "message": "Database connection successful (legacy Supabase)",
             "tables_accessible": True,
-            "sample_data_count": len(result.data) if result.data else 0
+            "sample_data_count": len(result.data) if result.data else 0,
         }
     except Exception as e:
         return {
             "status": "error",
             "message": f"Database connection failed: {str(e)}",
-            "tables_accessible": False
+            "tables_accessible": False,
         }
 
 
@@ -305,4 +336,4 @@ def calculate_scenario(req: ScenarioRequest) -> ScenarioResponse:
         raise HTTPException(status_code=500, detail="Internal scenario calculation error")
 
 
-# Local dev entrypoint: uvicorn backend.fastapi_app.main:app --reload
+# Local dev entrypoint: uvicorn fastapi_app.main:app --reload --host 0.0.0.0 --port 8000
