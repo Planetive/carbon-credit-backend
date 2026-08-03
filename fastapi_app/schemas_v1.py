@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
 
@@ -184,3 +184,167 @@ class CompanyEmissionOut(BaseModel):
 class MessageOut(BaseModel):
     status: str = "ok"
     message: str = ""
+
+
+# ----- GHG assessments / activities -----
+
+FRAMEWORKS = ("uk", "epa", "ipcc", "mixed")
+CALC_KINDS = ("finance", "facilitated")
+
+
+class EmissionAssessmentCreate(BaseModel):
+    framework: str = Field(default="mixed")
+    reporting_period: Optional[str] = None
+    status: str = Field(default="draft")
+    totals: Optional[Dict[str, Any]] = None
+    legacy_note: Optional[str] = None
+
+
+class EmissionAssessmentUpdate(BaseModel):
+    framework: Optional[str] = None
+    reporting_period: Optional[str] = None
+    status: Optional[str] = None
+    totals: Optional[Dict[str, Any]] = None
+    legacy_note: Optional[str] = None
+
+
+class EmissionAssessmentOut(BaseModel):
+    id: uuid.UUID
+    organization_id: uuid.UUID
+    user_id: uuid.UUID
+    framework: str
+    reporting_period: Optional[str] = None
+    status: str
+    totals: Dict[str, Any] = Field(default_factory=dict)
+    legacy_note: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class EmissionActivityCreate(BaseModel):
+    assessment_id: uuid.UUID
+    scope: int = Field(ge=1, le=3)
+    category: str = Field(min_length=1, max_length=200)
+    method: str = Field(default="activity_data")
+    counterparty_id: Optional[uuid.UUID] = None
+    quantity: Optional[Decimal] = None
+    unit: Optional[str] = None
+    factor_dataset_id: Optional[uuid.UUID] = None
+    factor_row_id: Optional[uuid.UUID] = None
+    emissions_tco2e: Optional[Decimal] = None
+    raw: Optional[Dict[str, Any]] = None
+
+
+class EmissionActivityUpdate(BaseModel):
+    scope: Optional[int] = Field(default=None, ge=1, le=3)
+    category: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    method: Optional[str] = None
+    counterparty_id: Optional[uuid.UUID] = None
+    quantity: Optional[Decimal] = None
+    unit: Optional[str] = None
+    factor_dataset_id: Optional[uuid.UUID] = None
+    factor_row_id: Optional[uuid.UUID] = None
+    emissions_tco2e: Optional[Decimal] = None
+    raw: Optional[Dict[str, Any]] = None
+
+
+class EmissionActivityOut(BaseModel):
+    id: uuid.UUID
+    assessment_id: uuid.UUID
+    organization_id: uuid.UUID
+    user_id: uuid.UUID
+    scope: int
+    category: str
+    method: str
+    counterparty_id: Optional[uuid.UUID] = None
+    quantity: Optional[Decimal] = None
+    unit: Optional[str] = None
+    factor_dataset_id: Optional[uuid.UUID] = None
+    factor_row_id: Optional[uuid.UUID] = None
+    emissions_tco2e: Optional[Decimal] = None
+    raw: Dict[str, Any] = Field(default_factory=dict)
+    legacy_source: str
+    legacy_id: Optional[uuid.UUID] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+# ----- Financed emissions -----
+
+class FinancedEmissionCreate(BaseModel):
+    calc_kind: str = Field(default="finance")
+    company_type: Optional[str] = None
+    formula_id: Optional[str] = None
+    formula_name: Optional[str] = None
+    inputs: Optional[Dict[str, Any]] = None
+    results: Optional[Dict[str, Any]] = None
+    financed_emissions: Optional[Decimal] = None
+    attribution_factor: Optional[Decimal] = None
+    data_quality_score: Optional[Decimal] = None
+    counterparty_id: Optional[uuid.UUID] = None
+    exposure_id: Optional[uuid.UUID] = None
+    questionnaire_id: Optional[uuid.UUID] = None
+    status: str = Field(default="completed")
+
+
+class FinancedEmissionUpdate(BaseModel):
+    calc_kind: Optional[str] = None
+    company_type: Optional[str] = None
+    formula_id: Optional[str] = None
+    formula_name: Optional[str] = None
+    inputs: Optional[Dict[str, Any]] = None
+    results: Optional[Dict[str, Any]] = None
+    financed_emissions: Optional[Decimal] = None
+    attribution_factor: Optional[Decimal] = None
+    data_quality_score: Optional[Decimal] = None
+    counterparty_id: Optional[uuid.UUID] = None
+    exposure_id: Optional[uuid.UUID] = None
+    questionnaire_id: Optional[uuid.UUID] = None
+    status: Optional[str] = None
+
+
+class FinancedEmissionOut(BaseModel):
+    id: uuid.UUID
+    organization_id: uuid.UUID
+    user_id: uuid.UUID
+    counterparty_id: Optional[uuid.UUID] = None
+    exposure_id: Optional[uuid.UUID] = None
+    questionnaire_id: Optional[uuid.UUID] = None
+    calc_kind: str
+    company_type: Optional[str] = None
+    formula_id: Optional[str] = None
+    formula_name: Optional[str] = None
+    inputs: Dict[str, Any] = Field(default_factory=dict)
+    results: Dict[str, Any] = Field(default_factory=dict)
+    financed_emissions: Optional[Decimal] = None
+    attribution_factor: Optional[Decimal] = None
+    data_quality_score: Optional[Decimal] = None
+    status: str
+    legacy_source: Optional[str] = None
+    legacy_id: Optional[uuid.UUID] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class FinancedCalculateRequest(BaseModel):
+    """Compute via existing calculation engine and optionally persist."""
+
+    calc_kind: str = Field(default="finance")
+    formula_id: str
+    company_type: str = Field(description="listed | unlisted / private")
+    inputs: Dict[str, Any]
+    counterparty_id: Optional[uuid.UUID] = None
+    exposure_id: Optional[uuid.UUID] = None
+    persist: bool = True
+
+
+class FinancedCalculateResponse(BaseModel):
+    success: bool = True
+    result: Dict[str, Any]
+    record: Optional[FinancedEmissionOut] = None
