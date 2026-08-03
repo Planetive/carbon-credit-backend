@@ -78,8 +78,19 @@ def me(
     ctx: OrgContext = Depends(get_current_org_context),
     db: Session = Depends(get_db),
 ) -> UserMeResponse:
-    profile = db.query(Profile).filter(Profile.user_id == ctx.user.id).first()
-    if not profile:
+    # Load only columns that exist on live EC2 (avoid full-entity SELECT *)
+    row = (
+        db.query(
+            Profile.id,
+            Profile.user_id,
+            Profile.display_name,
+            Profile.created_at,
+            Profile.updated_at,
+        )
+        .filter(Profile.user_id == ctx.user.id)
+        .first()
+    )
+    if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Profile not found for this user",
@@ -88,7 +99,13 @@ def me(
     return UserMeResponse(
         id=ctx.user.id,
         email=ctx.user.email,
-        profile=ProfileOut.model_validate(profile),
+        profile=ProfileOut(
+            id=row.id,
+            user_id=row.user_id,
+            display_name=row.display_name,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        ),
         current_organization_id=ctx.organization_id,
         role=ctx.role,
     )

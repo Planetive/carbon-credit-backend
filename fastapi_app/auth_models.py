@@ -1,5 +1,7 @@
 """
 SQLAlchemy models for JWT auth (public.users + public.profiles).
+
+Column set matches live EC2 rethinkcarbon schema (slim profiles).
 """
 
 from __future__ import annotations
@@ -8,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,6 +25,9 @@ class User(Base):
     )
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    email_confirmed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -39,6 +44,12 @@ class User(Base):
 
 
 class Profile(Base):
+    """
+    Live EC2 profiles columns only:
+    id, user_id, organization_name, display_name, phone, created_at, updated_at,
+    user_type, current_organization_id
+    """
+
     __tablename__ = "profiles"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -52,16 +63,8 @@ class Profile(Base):
         index=True,
     )
     organization_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    organization_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    industry: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    country: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    website: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    contact_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    contact_role: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
     phone: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    company_size: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    annual_revenue: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    sustainability_goals: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -81,7 +84,6 @@ class Profile(Base):
         ForeignKey("organizations.id", ondelete="SET NULL"),
         nullable=True,
     )
-    display_name: Mapped[str] = mapped_column(Text, nullable=False)
 
     user: Mapped["User"] = relationship("User", back_populates="profile")
 

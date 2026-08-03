@@ -37,8 +37,12 @@ def resolve_org_for_user(
     Resolve (organization_id, role) for a user.
     Returns (None, None) when the user has no memberships.
     """
-    profile = db.query(Profile).filter(Profile.user_id == user_id).first()
-    preferred_org_id = profile.current_organization_id if profile else None
+    # Load only columns that exist on live EC2 profiles (avoid SELECT *)
+    preferred_org_id = (
+        db.query(Profile.current_organization_id)
+        .filter(Profile.user_id == user_id)
+        .scalar()
+    )
 
     if preferred_org_id is not None:
         membership = (

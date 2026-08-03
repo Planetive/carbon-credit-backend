@@ -16,6 +16,11 @@ from .auth_routes import router as auth_router
 from .database import test_connection, get_supabase_client
 from .db import engine as pg_engine, test_postgres_connection
 from .finance_models import CompanyType
+from .routers.profiles import router as profiles_router
+from .routers.organizations import router as organizations_router
+from .routers.counterparties import router as counterparties_router
+from .routers.exposures import router as exposures_router
+from .routers.company_emissions import router as company_emissions_router
 import logging
 import os
 
@@ -27,6 +32,11 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Finance Emission Service", version="0.1.0")
 
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
+app.include_router(profiles_router, prefix="/api/v1")
+app.include_router(organizations_router, prefix="/api/v1")
+app.include_router(counterparties_router, prefix="/api/v1")
+app.include_router(exposures_router, prefix="/api/v1")
+app.include_router(company_emissions_router, prefix="/api/v1")
 
 # CORS configuration - allow frontend domain and local development
 # When allow_credentials=True, you cannot use allow_origins=["*"]
