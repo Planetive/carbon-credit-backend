@@ -2,9 +2,11 @@
 Password hashing (bcrypt) and JWT helpers.
 """
 
+from __future__ import annotations
+
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Dict, Optional, Union
 from uuid import UUID
 
 from dotenv import load_dotenv
@@ -34,11 +36,14 @@ def verify_password(plain_password: str, password_hash: str) -> bool:
     return pwd_context.verify(plain_password, password_hash)
 
 
-def create_access_token(subject: UUID | str, extra_claims: dict[str, Any] | None = None) -> str:
+def create_access_token(
+    subject: Union[UUID, str],
+    extra_claims: Optional[Dict[str, Any]] = None,
+) -> str:
     secret = _require_jwt_secret()
     now = datetime.now(timezone.utc)
     expire = now + timedelta(minutes=JWT_EXPIRE_MINUTES)
-    payload: dict[str, Any] = {
+    payload: Dict[str, Any] = {
         "sub": str(subject),
         "iat": int(now.timestamp()),
         "exp": int(expire.timestamp()),
@@ -48,7 +53,7 @@ def create_access_token(subject: UUID | str, extra_claims: dict[str, Any] | None
     return jwt.encode(payload, secret, algorithm=JWT_ALGORITHM)
 
 
-def decode_access_token(token: str) -> dict[str, Any]:
+def decode_access_token(token: str) -> Dict[str, Any]:
     secret = _require_jwt_secret()
     try:
         return jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])

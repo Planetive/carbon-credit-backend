@@ -2,8 +2,11 @@
 SQLAlchemy models for JWT auth (public.users + public.profiles).
 """
 
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
@@ -48,17 +51,17 @@ class Profile(Base):
         nullable=False,
         index=True,
     )
-    organization_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    organization_type: Mapped[str | None] = mapped_column(Text, nullable=True)
-    industry: Mapped[str | None] = mapped_column(Text, nullable=True)
-    country: Mapped[str | None] = mapped_column(Text, nullable=True)
-    website: Mapped[str | None] = mapped_column(Text, nullable=True)
-    contact_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    contact_role: Mapped[str | None] = mapped_column(Text, nullable=True)
-    phone: Mapped[str | None] = mapped_column(Text, nullable=True)
-    company_size: Mapped[str | None] = mapped_column(Text, nullable=True)
-    annual_revenue: Mapped[str | None] = mapped_column(Text, nullable=True)
-    sustainability_goals: Mapped[str | None] = mapped_column(Text, nullable=True)
+    organization_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    organization_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    industry: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    website: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    contact_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    contact_role: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    company_size: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    annual_revenue: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sustainability_goals: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -68,12 +71,12 @@ class Profile(Base):
         onupdate=func.now(),
         nullable=False,
     )
-    user_type: Mapped[str | None] = mapped_column(
+    user_type: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
         server_default="financial_institution",
     )
-    current_organization_id: Mapped[uuid.UUID | None] = mapped_column(
+    current_organization_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("organizations.id", ondelete="SET NULL"),
         nullable=True,
@@ -98,7 +101,7 @@ class UserOrganization(Base):
         UUID(as_uuid=True), nullable=False, index=True
     )
     role: Mapped[str] = mapped_column(Text, nullable=False, server_default="viewer")
-    status: Mapped[str | None] = mapped_column(Text, nullable=True, server_default="active")
-    created_at: Mapped[datetime | None] = mapped_column(
+    status: Mapped[Optional[str]] = mapped_column(Text, nullable=True, server_default="active")
+    created_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=True
     )

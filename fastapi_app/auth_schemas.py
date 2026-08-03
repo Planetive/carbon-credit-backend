@@ -2,8 +2,11 @@
 Pydantic schemas for auth API.
 """
 
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -23,8 +26,8 @@ class ProfileOut(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     display_name: str
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -38,8 +41,8 @@ class UserMeResponse(BaseModel):
     id: uuid.UUID
     email: str
     profile: ProfileOut
-    current_organization_id: uuid.UUID | None = None
-    role: str | None = None
+    current_organization_id: Optional[uuid.UUID] = None
+    role: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

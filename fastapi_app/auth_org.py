@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from typing import Optional, Tuple
 
 from fastapi import Depends
 from sqlalchemy import case, func
@@ -25,11 +26,13 @@ from .db import get_db
 @dataclass(frozen=True)
 class OrgContext:
     user: User
-    organization_id: uuid.UUID | None
-    role: str | None
+    organization_id: Optional[uuid.UUID]
+    role: Optional[str]
 
 
-def resolve_org_for_user(db: Session, user_id: uuid.UUID) -> tuple[uuid.UUID | None, str | None]:
+def resolve_org_for_user(
+    db: Session, user_id: uuid.UUID
+) -> Tuple[Optional[uuid.UUID], Optional[str]]:
     """
     Resolve (organization_id, role) for a user.
     Returns (None, None) when the user has no memberships.
