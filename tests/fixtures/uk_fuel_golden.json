@@ -1,0 +1,67 @@
+{
+  "_comment": "SPA FuelEmissions.tsx UK branch: emissions_kg = Number((quantity * factor).toFixed(6)). Never change formula code to make these pass.",
+  "explicit_factor": [
+    {
+      "id": "uk_qty10_factor_2_0627",
+      "quantity": 10,
+      "factor": 2.0627,
+      "expected_emissions_kg": 20.627
+    },
+    {
+      "id": "uk_qty1000_factor_0_18254",
+      "quantity": 1000,
+      "factor": 0.18254,
+      "expected_emissions_kg": 182.54
+    },
+    {
+      "id": "uk_round6_fractional",
+      "quantity": 3.141592,
+      "factor": 1.234567,
+      "expected_emissions_kg": 3.878506
+    }
+  ],
+  "map_lookup": [
+    {
+      "id": "uk_natural_gas_total",
+      "sheet_rows": [
+        {
+          "Activity": "Gaseous fuels",
+          "Fuel": "Natural Gas",
+          "Unit": "kWh (Net CV)",
+          "kg CO2e": 0.18254,
+          "kg CO2e of CO2 per unit": 0.18227,
+          "kg CO2e of CH4 per unit": 0.00024,
+          "kg CO2e of N2O per unit": 0.00003
+        }
+      ],
+      "activity": "Gaseous fuels",
+      "fuel": "Natural Gas",
+      "unit": "kWh (Net CV)",
+      "uk_factor_basis": "total",
+      "quantity": 1000,
+      "expected_factor": 0.18254,
+      "expected_emissions_kg": 182.54
+    },
+    {
+      "id": "uk_natural_gas_ch4_basis",
+      "sheet_rows": [
+        {
+          "Activity": "Gaseous fuels",
+          "Fuel": "Natural Gas",
+          "Unit": "kWh (Net CV)",
+          "kg CO2e": 0.18254,
+          "kg CO2e of CO2 per unit": 0.18227,
+          "kg CO2e of CH4 per unit": 0.00024,
+          "kg CO2e of N2O per unit": 0.00003
+        }
+      ],
+      "activity": "Gaseous fuels",
+      "fuel": "Natural Gas",
+      "unit": "kWh (Net CV)",
+      "uk_factor_basis": "ch4",
+      "quantity": 1000,
+      "expected_factor": 0.00024,
+      "expected_emissions_kg": 0.24
+    }
+  ]
+}

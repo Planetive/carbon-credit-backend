@@ -1,0 +1,125 @@
+{
+  "_comment": "SPA FuelEmissions.tsx EPA branch: raw=qty*factor; if unit startsWith CH4|N2O then /1000; emissions=Number(raw.toFixed(6)). N20 Unit typo intentional.",
+  "explicit_factor": [
+    {
+      "id": "epa_co2_mmbtu",
+      "quantity": 100,
+      "factor": 53.06,
+      "unit": "CO2 (kg CO2 / mmBtu)",
+      "expected_emissions_kg": 5306.0
+    },
+    {
+      "id": "epa_ch4_g_per_mmbtu_div1000",
+      "quantity": 100,
+      "factor": 3.0,
+      "unit": "CH4 (g CH4 / mmBtu)",
+      "expected_emissions_kg": 0.3
+    },
+    {
+      "id": "epa_n2o_g_per_gallon_div1000",
+      "quantity": 50,
+      "factor": 0.2,
+      "unit": "N2O (g N2O / gallon)",
+      "expected_emissions_kg": 0.01
+    }
+  ],
+  "map_lookup": [
+    {
+      "id": "epa_natural_gas_mmbtu_and_mmscf",
+      "sheet_rows": [
+        {
+          "Category": "Natural Gas",
+          "Fuel Type": "Natural Gas",
+          "Heat Content (HHV)": 0.001026,
+          "HHV Unit": "mmBtu/scf",
+          "CO2 Unit": "kg CO2/mmBtu",
+          "CH4 Unit": "g CH4/mmBtu",
+          "N20 Unit": "g N2O/mmBtu",
+          "CO2 Factor": 53.06,
+          "CH4 Factor": 1.0,
+          "N2O Factor": 0.1,
+          "CO2 Unit_1": "kg CO2/scf",
+          "CH4 Unit_1": "g CH4/scf",
+          "N2O Unit_1": "g N2O/scf",
+          "CO2 Factor_1": 0.05444,
+          "CH4 Factor_1": 0.001,
+          "N2O Factor_1": 0.0001
+        }
+      ],
+      "category": "Natural Gas",
+      "fuel": "Natural Gas",
+      "cases": [
+        {
+          "unit": "CO2 (kg CO2 / mmBtu)",
+          "quantity": 10,
+          "expected_factor": 53.06,
+          "expected_emissions_kg": 530.6
+        },
+        {
+          "unit": "CH4 (g CH4 / mmBtu)",
+          "quantity": 10,
+          "expected_factor": 1.0,
+          "expected_emissions_kg": 0.01
+        },
+        {
+          "unit": "N2O (g N2O / mmBtu)",
+          "quantity": 10,
+          "expected_factor": 0.1,
+          "expected_emissions_kg": 0.001
+        },
+        {
+          "unit": "CO2 (kg CO2 / MMSCF)",
+          "quantity": 10,
+          "expected_factor": 54439.56,
+          "expected_emissions_kg": 544395.6
+        },
+        {
+          "unit": "CH4 (g CH4 / MMSCF)",
+          "quantity": 10,
+          "expected_factor": 1026.0,
+          "expected_emissions_kg": 10.26
+        },
+        {
+          "unit": "N2O (g N2O / MMSCF)",
+          "quantity": 10,
+          "expected_factor": 102.6,
+          "expected_emissions_kg": 1.026
+        }
+      ]
+    },
+    {
+      "id": "epa_liquid_gallon",
+      "sheet_rows": [
+        {
+          "Category": "Petroleum Products",
+          "Fuel Type": "Motor Gasoline",
+          "CO2 Unit": "other",
+          "CH4 Unit": "other",
+          "N20 Unit": "other",
+          "CO2 Unit_1": "kg CO2/gallon",
+          "CH4 Unit_1": "g CH4/gallon",
+          "N2O Unit_1": "g N2O/gallon",
+          "CO2 Factor_1": 8.78,
+          "CH4 Factor_1": 0.38,
+          "N2O Factor_1": 0.08
+        }
+      ],
+      "category": "Petroleum Products",
+      "fuel": "Motor Gasoline",
+      "cases": [
+        {
+          "unit": "CO2 (kg CO2 / gallon)",
+          "quantity": 100,
+          "expected_factor": 8.78,
+          "expected_emissions_kg": 878.0
+        },
+        {
+          "unit": "CH4 (g CH4 / gallon)",
+          "quantity": 100,
+          "expected_factor": 0.38,
+          "expected_emissions_kg": 0.038
+        }
+      ]
+    }
+  ]
+}

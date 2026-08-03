@@ -1,0 +1,48 @@
+{
+  "attribution_factor": [
+    {
+      "id": "af_basic",
+      "outstanding_amount": 1000000,
+      "total_assets": 10000000,
+      "expected": 0.1
+    },
+    {
+      "id": "af_half",
+      "outstanding_amount": 500,
+      "total_assets": 1000,
+      "expected": 0.5
+    }
+  ],
+  "attribution_factor_listed": [
+    {
+      "id": "listed_basic",
+      "outstanding_amount": 250000,
+      "evic": 5000000,
+      "expected": 0.05
+    }
+  ],
+  "attribution_factor_unlisted": [
+    {
+      "id": "unlisted_basic",
+      "outstanding_amount": 200000,
+      "total_equity_plus_debt": 4000000,
+      "expected": 0.05
+    }
+  ],
+  "financed_emissions": [
+    {
+      "id": "fe_basic",
+      "outstanding_amount": 1000000,
+      "denominator": 10000000,
+      "emission_data": 50000,
+      "expected": 5000.0
+    },
+    {
+      "id": "fe_unit",
+      "outstanding_amount": 1,
+      "denominator": 1,
+      "emission_data": 42.5,
+      "expected": 42.5
+    }
+  ]
+}

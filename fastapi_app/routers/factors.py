@@ -204,3 +204,26 @@ def get_factor_row(
         )
     row, ds = pair
     return _row_out(row, ds)
+
+
+@router.get("/sheets/{code}", response_model=List[Dict[str, Any]])
+def get_factor_sheet_by_code(
+    code: str,
+    ctx: OrgContext = Depends(get_current_org_context),
+    db: Session = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    """
+    SPA convenience: load an entire factor sheet as legacy-shaped dicts
+    (attributes jsonb flattened — same as factorDualRead.factorRowToLegacyRecord).
+    """
+    _ = ctx
+    _require_factor_tables(db)
+    from ..factor_service import load_legacy_sheet
+
+    rows = load_legacy_sheet(db, codes=[code], name_hints=[code.replace("_", " ")])
+    if not rows:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No factor dataset matched code '{code}'",
+        )
+    return rows
