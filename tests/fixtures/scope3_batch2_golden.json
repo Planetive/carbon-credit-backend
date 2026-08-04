@@ -1,0 +1,74 @@
+{
+  "_comment": "Batch 2 Scope 3 explicit-factor goldens (SPA Scope3Section). Sync to SPA parity/cases.json later. Never change formulas to pass.",
+  "freight": [
+    {
+      "id": "freight_basic",
+      "distance": 100,
+      "weight": 50,
+      "co2_factor": 0.12,
+      "expected_emissions_kg": 600.0
+    }
+  ],
+  "business_travel": [
+    {
+      "id": "bt_km",
+      "distance": 100,
+      "co2_factor": 0.1,
+      "unit": "kg CO2e/km",
+      "expected_emissions_kg": 10.0
+    },
+    {
+      "id": "bt_mile",
+      "distance": 100,
+      "co2_factor": 0.161869,
+      "unit": "kg CO2e/mile",
+      "expected_emissions_kg": 10.058098350876758
+    }
+  ],
+  "employee_commuting": [
+    {
+      "id": "commute_basic",
+      "employees": 10,
+      "distance": 20,
+      "co2_factor": 0.1,
+      "expected_emissions_kg": 20.0
+    }
+  ],
+  "spend_based": [
+    {
+      "id": "spend_basic",
+      "amount": 1000,
+      "emission_factor": 0.35,
+      "expected_emissions_kg": 350.0
+    }
+  ],
+  "sold_products": [
+    {
+      "id": "sold_qty_factor",
+      "quantity": 100,
+      "factor": 2.5,
+      "expected_emissions_kg": 250.0
+    }
+  ],
+  "leased": [
+    {
+      "id": "leased_transport_row",
+      "distance": 50,
+      "factor": 0.17068,
+      "expected_emissions_kg": 8.534
+    },
+    {
+      "id": "leased_buildings_total",
+      "category": "buildings",
+      "electricity_kg": 4041.0,
+      "expected_emissions_kg": 4041.0
+    },
+    {
+      "id": "leased_equipment_total",
+      "category": "equipment",
+      "electricity_kg": 100.0,
+      "transport_rows_kg": [8.534, 10.0],
+      "expected_emissions_kg": 118.534
+    }
+  ]
+}

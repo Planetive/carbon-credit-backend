@@ -1,0 +1,111 @@
+{
+  "_comment": "Batch 3 IPCC goldens from EmissionCalculatorIPCC.tsx. Never change formulas to pass.",
+  "stationary": [
+    {
+      "id": "ipcc_stat_basic",
+      "quantity": 10,
+      "factor": 2.5,
+      "expected_emissions_kg": 25.0
+    }
+  ],
+  "vehicular": [
+    {
+      "id": "ipcc_veh_basic",
+      "diesel_liters": 100,
+      "petrol_liters": 50,
+      "expected_emissions_kg": 386.0,
+      "expected_tco2e": 0.386
+    }
+  ],
+  "kitchen": [
+    {
+      "id": "ipcc_kitchen_basic",
+      "lpg_kg": 10,
+      "ng_mmscf": 0.001,
+      "ghv": 1000,
+      "expected_emissions_kg": 68.16
+    }
+  ],
+  "power": [
+    {
+      "id": "ipcc_power_basic",
+      "diesel_liters": 100,
+      "ng_mmscf": 0.001,
+      "ghv": 1000,
+      "expected_emissions_kg": 323.06
+    }
+  ],
+  "heating": [
+    {
+      "id": "ipcc_heating_basic",
+      "ng_mmscf": 0.001,
+      "ghv": 1000,
+      "expected_emissions_kg": 53.06
+    }
+  ],
+  "road": [
+    {
+      "id": "ipcc_road_basic",
+      "quantity": 1000,
+      "factor": 0.074,
+      "expected_emissions_kg": 74.0
+    }
+  ],
+  "road_vehicle": [
+    {
+      "id": "ipcc_road_ch4",
+      "quantity": 100,
+      "ch4_factor": 0.02,
+      "n2o_factor": 0.01,
+      "selected_factor": "CH4",
+      "expected_emissions_kg": 2.0
+    }
+  ],
+  "usa_vehicles": [
+    {
+      "id": "ipcc_usa_basic",
+      "quantity": 50,
+      "factor": 0.015,
+      "expected_emissions_kg": 0.75
+    }
+  ],
+  "alt_fuel": [
+    {
+      "id": "ipcc_alt_n2o",
+      "quantity": 200,
+      "ch4_factor": 0.01,
+      "n2o_factor": 0.005,
+      "selected_factor": "NO2",
+      "expected_emissions_kg": 1.0
+    }
+  ],
+  "industry": [
+    {
+      "id": "ipcc_industry_co2",
+      "quantity": 10,
+      "ef_co2": 94.6,
+      "ef_ch4": 0.001,
+      "ef_n2o": 0.0001,
+      "selected_factor": "CO2",
+      "expected_emissions_kg": 946.0
+    }
+  ],
+  "flaring": [
+    {
+      "id": "ipcc_flare_ch4_1mmscf",
+      "volume": 1,
+      "unit": "MMSCF",
+      "composition": [{"formula": "CH4", "percentage": 100}],
+      "expected_emissions_kg": 536818.2771820728
+    }
+  ],
+  "venting": [
+    {
+      "id": "ipcc_vent_ch4_1mmscf",
+      "volume": 1,
+      "unit": "MMSCF",
+      "composition": [{"gas": "CH4", "percentage": 100}],
+      "expected_emissions_kg": 536818.2771820726
+    }
+  ]
+}

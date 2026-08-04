@@ -1,0 +1,204 @@
+{
+  "_comment": "Parity cases: SPA spaMath computes frontend expected; API compare hits /api/v1/calc/*. Explicit-factor only (no DB sheet lookup) so both sides stay comparable offline. Never change formulas to pass.",
+  "uk_fuel": [
+    {
+      "id": "uk_qty10_factor_2_0627",
+      "quantity": 10,
+      "factor": 2.0627,
+      "expected_emissions_kg": 20.627
+    },
+    {
+      "id": "uk_qty1000_factor_0_18254",
+      "quantity": 1000,
+      "factor": 0.18254,
+      "expected_emissions_kg": 182.54
+    },
+    {
+      "id": "uk_round6_fractional",
+      "quantity": 3.141592,
+      "factor": 1.234567,
+      "expected_emissions_kg": 3.878506
+    }
+  ],
+  "epa_fuel": [
+    {
+      "id": "epa_co2_mmbtu",
+      "quantity": 100,
+      "factor": 53.06,
+      "unit": "CO2 (kg CO2 / mmBtu)",
+      "expected_emissions_kg": 5306.0
+    },
+    {
+      "id": "epa_ch4_g_per_mmbtu_div1000",
+      "quantity": 100,
+      "factor": 3.0,
+      "unit": "CH4 (g CH4 / mmBtu)",
+      "expected_emissions_kg": 0.3
+    },
+    {
+      "id": "epa_n2o_g_per_gallon_div1000",
+      "quantity": 50,
+      "factor": 0.2,
+      "unit": "N2O (g N2O / gallon)",
+      "expected_emissions_kg": 0.01
+    }
+  ],
+  "mobile_fuel": [
+    {
+      "id": "mobile_gallon",
+      "quantity": 10,
+      "factor": 8.78,
+      "input_unit": "gallon",
+      "expected_emissions_kg": 87.8
+    },
+    {
+      "id": "mobile_liter_to_gallon",
+      "quantity": 10,
+      "factor": 8.78,
+      "input_unit": "liter",
+      "expected_emissions_kg": 23.194317
+    }
+  ],
+  "on_road_gasoline": [
+    {
+      "id": "onroad_ch4_100mi",
+      "distance": 100,
+      "distance_unit": "mile",
+      "ch4_g_per_mile": 0.019,
+      "expected_emissions_kg": 0.0019
+    },
+    {
+      "id": "onroad_ch4_100km",
+      "distance": 100,
+      "distance_unit": "km",
+      "ch4_g_per_mile": 0.019,
+      "expected_emissions_kg": 0.0011806049
+    }
+  ],
+  "on_road_diesel": [
+    {
+      "id": "diesel_ch4_explicit",
+      "distance": 200,
+      "distance_unit": "mile",
+      "ch4_g_per_mile": 0.0051,
+      "expected_emissions_kg": 0.00102
+    }
+  ],
+  "non_road": [
+    {
+      "id": "nonroad_gallon_ch4",
+      "quantity": 10,
+      "unit": "gallon",
+      "ch4_g_per_gallon": 1.0,
+      "expected_emissions_kg": 0.01
+    },
+    {
+      "id": "nonroad_liter_ch4",
+      "quantity": 10,
+      "unit": "liter",
+      "ch4_g_per_gallon": 1.0,
+      "expected_emissions_kg": 0.0026417217685798895
+    }
+  ],
+  "heat_steam": [
+    {
+      "id": "heat_co2_mmbtu",
+      "quantity": 10,
+      "gas": "co2",
+      "co2_factor": 53.06,
+      "expected_emissions_kg": 530.6
+    },
+    {
+      "id": "heat_ch4_mmbtu",
+      "quantity": 10,
+      "gas": "ch4",
+      "ch4_factor": 1.0,
+      "expected_emissions_kg": 0.01
+    },
+    {
+      "id": "heat_mmscf_to_mmbtu",
+      "quantity": 1,
+      "quantity_unit": "mmscf",
+      "gas": "co2",
+      "co2_factor": 53.06,
+      "expected_emissions_kg": 55023.22
+    }
+  ],
+  "waste": [
+    {
+      "id": "waste_explicit",
+      "volume": 100,
+      "disposal_method": "Landfilled",
+      "factor": 0.05,
+      "expected_emissions_kg": 5.0
+    }
+  ],
+  "uk_passenger": [
+    {
+      "id": "passenger_explicit",
+      "distance": 50,
+      "factor": 0.17068,
+      "expected_emissions_kg": 8.534
+    }
+  ],
+  "uk_delivery": [
+    {
+      "id": "delivery_explicit",
+      "distance": 100,
+      "factor": 0.88246,
+      "expected_emissions_kg": 88.246
+    }
+  ],
+  "uk_refrigerant": [
+    {
+      "id": "refrig_explicit",
+      "quantity": 2.5,
+      "factor": 1430,
+      "expected_emissions_kg": 3575.0
+    }
+  ],
+  "electricity": [
+    {
+      "id": "elec_grid_only_uae",
+      "total_kwh": 10000,
+      "grid_pct": 100,
+      "grid_factor": 0.4041,
+      "expected_emissions_kg": 4041.0
+    },
+    {
+      "id": "elec_grid_50_pakistan",
+      "total_kwh": 1000,
+      "grid_pct": 50,
+      "grid_factor": 0.425,
+      "expected_emissions_kg": 212.5
+    },
+    {
+      "id": "elec_grid_plus_other",
+      "total_kwh": 1000,
+      "grid_pct": 80,
+      "grid_factor": 0.4041,
+      "other_pct": 20,
+      "other_row_emissions_sum": 0.5,
+      "expected_emissions_kg": 423.28
+    }
+  ],
+  "epa_refrigerant": [
+    {
+      "id": "epa_refrig_leakage_record",
+      "method": "leakage_record",
+      "gwp": 1430,
+      "leakage_kg": 2.5,
+      "expected_leakage_kg": 2.5,
+      "expected_emissions_kg": 3575.0
+    },
+    {
+      "id": "epa_refrig_estimated",
+      "method": "estimated_leakage",
+      "gwp": 3922,
+      "charge_kg": 10,
+      "leakage_rate_percent": 5,
+      "expected_leakage_kg": 0.5,
+      "expected_emissions_kg": 1961.0
+    }
+  ]
+}
