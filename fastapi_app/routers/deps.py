@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
+import secrets
 import uuid
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..auth_models import UserOrganization
@@ -24,6 +26,24 @@ def require_org_context(
             detail="No organization context; join or create an organization first",
         )
     return ctx
+
+
+def require_platform_admin(
+    x_admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key"),
+) -> None:
+    """
+    Platform admin gate for cross-user ESG admin screens.
+    Set ADMIN_API_KEY (preferred) or ADMIN_PASSWORD on the backend.
+    """
+    expected = (
+        os.environ.get("ADMIN_API_KEY") or os.environ.get("ADMIN_PASSWORD") or ""
+    ).strip()
+    provided = (x_admin_key or "").strip()
+    if not expected or not provided or not secrets.compare_digest(provided, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing admin key",
+        )
 
 
 def get_membership(

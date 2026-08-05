@@ -17,6 +17,7 @@ from .database import test_connection, get_supabase_client
 from .db import engine as pg_engine, test_postgres_connection
 from .finance_models import CompanyType
 from .routers.profiles import router as profiles_router
+from .routers.calculator_preferences import router as calculator_preferences_router
 from .routers.organizations import router as organizations_router
 from .routers.counterparties import router as counterparties_router
 from .routers.exposures import router as exposures_router
@@ -28,6 +29,7 @@ from .routers.catalog import router as catalog_router
 from .routers.factors import router as factors_router
 from .routers.calc import router as calc_router
 from .routers.calc_extended import router as calc_extended_router
+from .routers.esg import router as esg_router
 import logging
 import os
 
@@ -40,6 +42,7 @@ app = FastAPI(title="Finance Emission Service", version="0.1.0")
 
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(profiles_router, prefix="/api/v1")
+app.include_router(calculator_preferences_router, prefix="/api/v1")
 app.include_router(organizations_router, prefix="/api/v1")
 app.include_router(counterparties_router, prefix="/api/v1")
 app.include_router(exposures_router, prefix="/api/v1")
@@ -51,6 +54,7 @@ app.include_router(catalog_router, prefix="/api/v1")
 app.include_router(factors_router, prefix="/api/v1")
 app.include_router(calc_router, prefix="/api/v1")
 app.include_router(calc_extended_router, prefix="/api/v1")
+app.include_router(esg_router, prefix="/api/v1")
 
 # CORS configuration - allow frontend domain and local development
 # When allow_credentials=True, you cannot use allow_origins=["*"]

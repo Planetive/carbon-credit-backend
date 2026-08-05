@@ -34,6 +34,7 @@ Optional:
 | `JWT_ALGORITHM` | `HS256` |
 | `JWT_EXPIRE_MINUTES` | `10080` (7 days) |
 | `ALLOWED_ORIGINS` | Comma-separated CORS origins |
+| `ADMIN_API_KEY` | Platform admin key for `/api/v1/esg/admin/*` (same value as SPA `VITE_ADMIN_PASSWORD`); falls back to `ADMIN_PASSWORD` |
 | `SUPABASE_SERVICE_ROLE_KEY` | Legacy fallback only for `/health` and `/test-db` |
 
 ### 3. Auth SQL (once per database)
@@ -66,7 +67,7 @@ curl http://localhost:8000/test-db
 ## Railway
 
 - This repo is the deploy target. Start: `uvicorn fastapi_app.main:app --host 0.0.0.0 --port $PORT`
-- Set `DATABASE_URL` (EC2) and `JWT_SECRET` on the Railway service
+- Set `DATABASE_URL` (EC2), `JWT_SECRET`, and `ADMIN_API_KEY` on the Railway service
 - Do **not** attach Railway Postgres; the app uses external EC2 Postgres
 
 ## Security notes
