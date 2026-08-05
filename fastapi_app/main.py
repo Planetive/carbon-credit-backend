@@ -18,6 +18,8 @@ from .db import engine as pg_engine, test_postgres_connection
 from .finance_models import CompanyType
 from .routers.profiles import router as profiles_router
 from .routers.calculator_preferences import router as calculator_preferences_router
+from .routers.project_inputs import router as project_inputs_router
+from .routers.contact_submissions import router as contact_submissions_router
 from .routers.organizations import router as organizations_router
 from .routers.counterparties import router as counterparties_router
 from .routers.exposures import router as exposures_router
@@ -43,6 +45,8 @@ app = FastAPI(title="Finance Emission Service", version="0.1.0")
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(profiles_router, prefix="/api/v1")
 app.include_router(calculator_preferences_router, prefix="/api/v1")
+app.include_router(project_inputs_router, prefix="/api/v1")
+app.include_router(contact_submissions_router, prefix="/api/v1")
 app.include_router(organizations_router, prefix="/api/v1")
 app.include_router(counterparties_router, prefix="/api/v1")
 app.include_router(exposures_router, prefix="/api/v1")
