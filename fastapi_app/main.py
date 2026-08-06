@@ -24,6 +24,10 @@ from .routers.organizations import router as organizations_router
 from .routers.org_invitations import router as org_invitations_router
 from .routers.invitations import router as invitations_router
 from .routers.counterparties import router as counterparties_router
+from .routers.questionnaires import (
+    counterparties_q_router as counterparties_questionnaire_router,
+    questionnaires_router,
+)
 from .routers.exposures import router as exposures_router
 from .routers.company_emissions import router as company_emissions_router
 from .routers.emission_assessments import router as emission_assessments_router
@@ -53,6 +57,8 @@ app.include_router(organizations_router, prefix="/api/v1")
 app.include_router(org_invitations_router, prefix="/api/v1")
 app.include_router(invitations_router, prefix="/api/v1")
 app.include_router(counterparties_router, prefix="/api/v1")
+app.include_router(counterparties_questionnaire_router, prefix="/api/v1")
+app.include_router(questionnaires_router, prefix="/api/v1")
 app.include_router(exposures_router, prefix="/api/v1")
 app.include_router(company_emissions_router, prefix="/api/v1")
 app.include_router(emission_assessments_router, prefix="/api/v1")

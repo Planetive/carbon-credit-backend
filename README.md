@@ -28,7 +28,7 @@ See [SETUP.md](SETUP.md) for env vars and Railway notes.
 
 - `GET /health`, `GET /test-db`
 - Auth: `POST /auth/signup`, `POST /auth/login`, `GET /auth/me`, `POST /auth/logout`
-- Portfolio / orgs: `/api/v1/me/profile`, `/api/v1/me/calculator-preferences`, `/api/v1/me/project-inputs`, `/api/v1/me/project-reports`, `/api/v1/organizations`, `/api/v1/organizations/{id}/invitations`, `/api/v1/organizations/{id}/members`, `/api/v1/invitations/accept`, `/api/v1/invitations/by-token/{token}`, `/api/v1/counterparties`, `/api/v1/exposures`, `/api/v1/company-emissions`
+- Portfolio / orgs: `/api/v1/me/profile`, `/api/v1/me/calculator-preferences`, `/api/v1/me/project-inputs`, `/api/v1/me/project-reports`, `/api/v1/organizations`, `/api/v1/organizations/{id}/invitations`, `/api/v1/organizations/{id}/members`, `/api/v1/invitations/accept`, `/api/v1/invitations/by-token/{token}`, `/api/v1/counterparties`, `/api/v1/counterparties/{id}/questionnaire`, `/api/v1/questionnaires`, `/api/v1/exposures`, `/api/v1/company-emissions`
 - Contact: `POST /api/v1/contact-submissions` (public); admin `GET|PATCH|DELETE /api/v1/admin/contact-submissions` (`X-Admin-Key`)
 - GHG: `/api/v1/emission-assessments`, `/api/v1/emission-activities`
 - Financed: `/api/v1/financed-emissions`, `POST /api/v1/financed-emissions/calculate`
