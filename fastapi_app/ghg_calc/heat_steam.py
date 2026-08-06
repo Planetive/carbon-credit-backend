@@ -138,11 +138,12 @@ def calculate_heat_steam(
             return fail_payload("Could not resolve N2O heat/steam factor")
         factor = float(n2o_factor) if n2o_factor is not None else HEAT_DEFAULT_FACTOR
 
-    qty_base = (
-        float(quantity) * MMBTU_PER_MMSCF
-        if quantity_unit == "mmscf" and supports
-        else float(quantity)
-    )
+    # SPA resolveHeatSteamEmissionsKg: once quantity_unit is "mmscf" on the wire,
+    # always convert ×1037 (no supports_mmscf gate).
+    if str(quantity_unit or "").lower() == "mmscf":
+        qty_base = float(quantity) * MMBTU_PER_MMSCF
+    else:
+        qty_base = float(quantity)
     emissions_kg = compute_emissions_kg(gas, factor, qty_base)
     return success_payload(
         emissions_kg,

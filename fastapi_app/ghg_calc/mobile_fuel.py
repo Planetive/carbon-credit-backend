@@ -1,8 +1,8 @@
 """
-EPA mobile combustion — ported from SPA MobileFuelEmissions.tsx.
+EPA mobile combustion — ported from SPA MobileFuelEmissions / localMobileFuelEmissionsKg.
 
 Formula:
-  if base unit contains "gallon" and input_unit == "liter":
+  if input_unit starts with liter/litre:
     qty = quantity / 3.78541
   else:
     qty = quantity
@@ -71,12 +71,14 @@ def calculate_mobile_fuel(
     if resolved_factor is None:
         return fail_payload("Could not resolve mobile combustion factor")
 
-    base_unit = resolved_unit or ""
-    is_gallon_base = "gallon" in base_unit.lower()
-    effective = float(quantity)
-    iu = input_unit or ("gallon" if is_gallon_base else None)
-    if is_gallon_base and iu == "liter":
+    # SPA localMobileFuelEmissionsKg: conversion driven only by input_unit
+    # (liter/litre → /3.78541). Does not require factor unit to contain "gallon".
+    iu_raw = input_unit
+    iu = str(iu_raw or "").lower()
+    if iu.startswith("liter") or iu.startswith("litre"):
         effective = float(quantity) / LITERS_PER_GALLON
+    else:
+        effective = float(quantity)
 
     emissions_kg = round6(effective * float(resolved_factor))
     return success_payload(
@@ -85,7 +87,7 @@ def calculate_mobile_fuel(
         extra={
             "fuel_type": fuel_type,
             "unit": resolved_unit,
-            "input_unit": iu,
+            "input_unit": iu_raw,
             "quantity": quantity,
             "effective_quantity": effective,
         },
