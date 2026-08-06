@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import uuid
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import Depends, Header, HTTPException, status
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..auth_models import UserOrganization
@@ -61,6 +63,31 @@ def get_membership(
     )
 
 
+def _membership_permissions(
+    db: Session, user_id: uuid.UUID, organization_id: uuid.UUID
+) -> Dict[str, Any]:
+    raw = db.execute(
+        text(
+            """
+            SELECT permissions FROM public.user_organizations
+            WHERE user_id = :user_id AND organization_id = :organization_id
+            LIMIT 1
+            """
+        ),
+        {"user_id": str(user_id), "organization_id": str(organization_id)},
+    ).scalar()
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+    return dict(raw)
+
+
 def require_org_member(
     organization_id: uuid.UUID,
     ctx: OrgContext = Depends(get_current_org_context),
@@ -87,3 +114,21 @@ def require_org_admin(
             detail="Admin or owner role required",
         )
     return membership
+
+
+def require_can_invite(
+    organization_id: uuid.UUID,
+    ctx: OrgContext = Depends(get_current_org_context),
+    db: Session = Depends(get_db),
+) -> UserOrganization:
+    """Admin/owner role, or permissions.can_manage_organizations / can_invite_users."""
+    membership = require_org_member(organization_id, ctx, db)
+    if (membership.role or "").lower() in ADMIN_ROLES:
+        return membership
+    perms = _membership_permissions(db, ctx.user.id, organization_id)
+    if perms.get("can_manage_organizations") or perms.get("can_invite_users"):
+        return membership
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Admin role or invite permission required",
+    )
