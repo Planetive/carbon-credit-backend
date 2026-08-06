@@ -23,9 +23,11 @@ CATALOG_TABLES = (
     ("global-projects-2025", "catalog", "global_projects_2025"),
     ("ccus-projects", "catalog", "ccus_projects"),
     ("ccus-policies", "catalog", "ccus_policies"),
+    ("ccus-management-strategies", "catalog", "ccus_management_strategies"),
     ("bess", "catalog", "bess"),
     ("carbon-credit-markets", "catalog", "carbon_credit_markets"),
     ("compliance-mechanisms", "catalog", "compliance_mechanisms"),
+    ("suppliers", "public", "suppliers"),
 )
 
 
@@ -155,3 +157,77 @@ def list_compliance_mechanisms(
 ) -> List[Dict[str, Any]]:
     _ = ctx
     return _list_catalog(db, "catalog", "compliance_mechanisms", limit, offset)
+
+
+def _list_with_public_fallback(
+    db: Session,
+    catalog_table: str,
+    public_table: str,
+    limit: int,
+    offset: int,
+) -> List[Dict[str, Any]]:
+    if table_exists(db, "catalog", catalog_table):
+        return _list_catalog(db, "catalog", catalog_table, limit, offset)
+    if table_exists(db, "public", public_table):
+        return _list_catalog(db, "public", public_table, limit, offset)
+    return []
+
+
+@router.get("/ccus-policies", response_model=List[Dict[str, Any]])
+def list_ccus_policies(
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    ctx: OrgContext = Depends(get_current_org_context),
+    db: Session = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    _ = ctx
+    return _list_with_public_fallback(db, "ccus_policies", "ccus_policies", limit, offset)
+
+
+@router.get("/ccus-management-strategies", response_model=List[Dict[str, Any]])
+def list_ccus_management_strategies(
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    ctx: OrgContext = Depends(get_current_org_context),
+    db: Session = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    _ = ctx
+    return _list_with_public_fallback(
+        db, "ccus_management_strategies", "ccus_management_strategies", limit, offset
+    )
+
+
+@router.get("/suppliers", response_model=List[Dict[str, Any]])
+def list_suppliers(
+    q: Optional[str] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    ctx: OrgContext = Depends(get_current_org_context),
+    db: Session = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    """KEEP public.suppliers — Scope 3 supplier search (missing table → [])."""
+    _ = ctx
+    if not table_exists(db, "public", "suppliers"):
+        logger.warning("Catalog table missing: public.suppliers — returning empty list")
+        return []
+
+    where_sql = ""
+    params: Dict[str, Any] = {}
+    q_trim = (q or "").strip()
+    if q_trim:
+        where_sql = (
+            "WHERE supplier_name ILIKE :q "
+            "OR COALESCE(code, '') ILIKE :q"
+        )
+        params["q"] = f"%{q_trim}%"
+
+    return fetch_table_rows(
+        db,
+        schema="public",
+        table="suppliers",
+        limit=limit,
+        offset=offset,
+        where_sql=where_sql,
+        params=params,
+        order_by="supplier_name ASC",
+    )

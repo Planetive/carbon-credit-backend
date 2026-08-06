@@ -36,7 +36,7 @@ See [SETUP.md](SETUP.md) for env vars and Railway notes.
 - ESG (JWT + org): `/api/v1/esg/assessments`, `/assessments/latest`, `/scores` — user-scoped CRUD on `public.esg_assessments` / `esg_scores`
 - ESG admin (`X-Admin-Key`, no JWT): `/api/v1/esg/admin/assessments`, `/admin/assessments/{id}` — cross-user list/detail for admin dashboard
 - Calc (JWT, SPA math parity): `/api/v1/calc/uk/fuel`, `/epa/fuel`, `/uk/passenger|delivery|refrigerant`, `/epa/mobile-fuel`, `/epa/on-road-gasoline|diesel`, `/epa/non-road`, `/heat-steam`, `/waste` — optional persist to `app.emission_activities` when `assessment_id` + `persist`
-- Catalog (read-only, JWT): `/api/v1/catalog/country-emissions`, `global-projects`, `ccus-projects`, `bess`, `carbon-credit-markets`, … — missing tables return `[]`
+- Catalog (read-only, JWT): `/api/v1/catalog/country-emissions`, `global-projects`, `ccus-projects`, `bess`, `carbon-credit-markets`, `suppliers`, … — missing tables return `[]`
 - Calc (stateless): `POST /finance-emission`, `POST /facilitated-emission`, `POST /scenario/calculate`
 
 ## Deploy (Railway)
