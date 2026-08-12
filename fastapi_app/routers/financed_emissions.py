@@ -15,6 +15,7 @@ from ..calculation_engine import CalculationEngine
 from ..db import get_db
 from ..finance_models import CompanyType
 from ..ghg_models import FinancedEmission
+from ..ppp_gdp import apply_ppp_resolution, is_sovereign_formula
 from ..schemas_v1 import (
     CALC_KINDS,
     FinancedCalculateRequest,
@@ -159,10 +160,22 @@ def calculate_and_persist(
         if body.company_type in ("listed", CompanyType.LISTED.value)
         else CompanyType.PRIVATE
     )
+    inputs = dict(body.inputs or {})
+    if inputs.get("resolve_ppp_gdp") or is_sovereign_formula(body.formula_id):
+        try:
+            inputs = apply_ppp_resolution(
+                db,
+                inputs,
+                require_country=bool(inputs.get("resolve_ppp_gdp")),
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
     try:
         calc_result = _engine().calculate(
             formula_id=body.formula_id,
-            inputs=body.inputs,
+            inputs=inputs,
             company_type=company_type,
         )
     except ValueError as exc:
@@ -185,7 +198,7 @@ def calculate_and_persist(
             company_type=body.company_type,
             formula_id=body.formula_id,
             formula_name=result_dict.get("methodology"),
-            inputs=body.inputs,
+            inputs=inputs,
             results=result_dict,
             financed_emissions=Decimal(str(calc_result.financed_emissions)),
             attribution_factor=Decimal(str(calc_result.attribution_factor)),

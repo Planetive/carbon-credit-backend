@@ -6,10 +6,12 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..auth_org import OrgContext, get_current_org_context
 from ..db import get_db
+from ..ppp_gdp import row_has_resolvable_ppp
 from .catalog_utils import fetch_table_rows, table_exists
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,7 @@ CATALOG_TABLES = (
     ("carbon-credit-markets", "catalog", "carbon_credit_markets"),
     ("compliance-mechanisms", "catalog", "compliance_mechanisms"),
     ("suppliers", "public", "suppliers"),
+    ("ppp-adjusted-gdp", "ref", "ppp_adjusted_gdp"),
 )
 
 
@@ -231,3 +234,45 @@ def list_suppliers(
         params=params,
         order_by="supplier_name ASC",
     )
+
+
+@router.get("/ppp-adjusted-gdp", response_model=List[Dict[str, Any]])
+def list_ppp_adjusted_gdp(
+    limit: int = Query(default=5000, ge=1, le=10000),
+    offset: int = Query(default=0, ge=0),
+    ctx: OrgContext = Depends(get_current_org_context),
+    db: Session = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    """KEEP ref.ppp_adjusted_gdp — countries with at least one usable GDP year."""
+    _ = ctx
+    if not table_exists(db, "ref", "ppp_adjusted_gdp"):
+        logger.warning("Catalog table missing: ref.ppp_adjusted_gdp — returning empty list")
+        return []
+
+    rows = (
+        db.execute(
+            text(
+                """
+                SELECT country_name, gdp_2024, gdp_2025
+                FROM ref.ppp_adjusted_gdp
+                WHERE (gdp_2025 IS NOT NULL AND gdp_2025 > 0)
+                   OR (gdp_2024 IS NOT NULL AND gdp_2024 > 0)
+                ORDER BY country_name
+                LIMIT :limit OFFSET :offset
+                """
+            ),
+            {"limit": limit, "offset": offset},
+        )
+        .mappings()
+        .all()
+    )
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        row = dict(r)
+        if not row_has_resolvable_ppp(row):
+            continue
+        for key in ("gdp_2024", "gdp_2025"):
+            if row.get(key) is not None and hasattr(row[key], "as_tuple"):
+                row[key] = float(row[key])
+        out.append(row)
+    return out
