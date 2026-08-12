@@ -31,6 +31,7 @@ CATALOG_TABLES = (
     ("compliance-mechanisms", "catalog", "compliance_mechanisms"),
     ("suppliers", "public", "suppliers"),
     ("ppp-adjusted-gdp", "ref", "ppp_adjusted_gdp"),
+    ("country-sector-intensity", "ref", "country_sector_intensity"),
 )
 
 
@@ -276,3 +277,26 @@ def list_ppp_adjusted_gdp(
                 row[key] = float(row[key])
         out.append(row)
     return out
+
+
+@router.get("/country-sector-intensity", response_model=List[Dict[str, Any]])
+def list_country_sector_intensity(
+    country_name: Optional[str] = Query(default=None),
+    limit: int = Query(default=5000, ge=1, le=10000),
+    ctx: OrgContext = Depends(get_current_org_context),
+    db: Session = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    _ = ctx
+    if not table_exists(db, "ref", "country_sector_intensity"):
+        logger.warning("Catalog table missing: ref.country_sector_intensity — returning empty list")
+        return []
+
+    query = "SELECT * FROM ref.country_sector_intensity"
+    params: Dict[str, Any] = {"limit": limit}
+    country = (country_name or "").strip()
+    if country:
+        query += " WHERE lower(country_name) = lower(:country_name)"
+        params["country_name"] = country
+    query += " ORDER BY sector_name LIMIT :limit"
+    rows = db.execute(text(query), params).mappings().all()
+    return [dict(r) for r in rows]
