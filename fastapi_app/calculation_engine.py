@@ -24,9 +24,13 @@ from .corporate_bond_business_loan_configs import CORPORATE_BOND_BUSINESS_LOAN_F
 from .commercial_real_estate_configs import COMMERCIAL_REAL_ESTATE_FORMULAS
 from .mortgage_configs import MORTGAGE_FORMULAS
 from .motor_vehicle_loan_configs import MOTOR_VEHICLE_LOAN_FORMULAS
+from .motor_vehicle_pcaf import run_motor_vehicle_calculation
 from .project_finance_configs import PROJECT_FINANCE_FORMULAS
 from .sovereign_debt_configs import SOVEREIGN_DEBT_FORMULAS
+from .sovereign_pcaf import run_sovereign_calculation
+from .property_pcaf import normalize_property_field_aliases, run_property_loan_calculation
 from .facilitated_emission_configs import FACILITATED_EMISSION_FORMULAS
+from .ppp_gdp import normalize_sovereign_field_aliases
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -82,7 +86,15 @@ class CalculationEngine:
         Migrated from: validateInputs
         """
         formula = self.get_formula_by_id(formula_id)
-        
+
+        if formula and formula.category == FormulaCategory.SOVEREIGN_DEBT:
+            inputs = normalize_sovereign_field_aliases(dict(inputs))
+        if formula and formula.category in (
+            FormulaCategory.COMMERCIAL_REAL_ESTATE,
+            FormulaCategory.MORTGAGE,
+        ):
+            inputs = normalize_property_field_aliases(dict(inputs))
+
         # DEBUG: Log validation details
         logger.info(f'🔍 CALCULATION ENGINE DEBUG - Formula ID: {formula_id}')
         logger.info(f'🔍 CALCULATION ENGINE DEBUG - Formula: {formula.name if formula else "Not found"}')
@@ -90,7 +102,7 @@ class CalculationEngine:
         if formula:
             required_inputs = [input_field.name for input_field in formula.inputs if input_field.required]
             logger.info(f'🔍 CALCULATION ENGINE DEBUG - Required inputs: {required_inputs}')
-        
+
         if not formula:
             return FormulaValidationResult(
                 is_valid=False,
@@ -98,50 +110,110 @@ class CalculationEngine:
                 warnings=[],
                 missing_inputs=[]
             )
-        
+
         errors: List[str] = []
         warnings: List[str] = []
         missing_inputs: List[str] = []
-        
+
+        # Motor vehicle: outstanding required; vehicle_entries OR aggregate fields validated in calc.
+        motor_skip_required = set()
+        if formula.category == FormulaCategory.MOTOR_VEHICLE_LOAN:
+            motor_skip_required = {
+                "total_value_at_origination",
+                "fuel_consumption",
+                "distance_traveled",
+                "efficiency",
+                "emission_factor",
+                "total_vehicle_emissions",
+                "vehicle_entries",
+            }
+
+        # Sovereign aliases: accept legacy verified_emissions / ppp_adjusted_gdp as present
+        sovereign_aliases = {
+            "pp_adjusted_gdp": ("ppp_adjusted_gdp", "pp_adjusted_gdp"),
+            "verified_country_emissions": ("verified_emissions", "verified_country_emissions"),
+            "unverified_country_emissions": ("unverified_emissions", "unverified_country_emissions"),
+            "proxy_pp_adjusted_gdp": ("proxy_ppp_adjusted_gdp", "proxy_pp_adjusted_gdp"),
+        }
+        property_aliases = {
+            "energy_consumption": ("actual_energy_consumption", "energy_consumption"),
+            "emission_factor": (
+                "supplier_specific_emission_factor",
+                "average_emission_factor",
+                "emission_factor",
+            ),
+        }
+
         # Check required inputs
         for input_field in formula.inputs:
-            if input_field.required:
-                logger.info(f'🔍 CALCULATION ENGINE DEBUG - Checking required input: {input_field.name} = {inputs.get(input_field.name)}')
-                if input_field.name not in inputs or inputs[input_field.name] is None:
-                    logger.info(f'❌ CALCULATION ENGINE DEBUG - Missing required input: {input_field.name}')
-                    missing_inputs.append(input_field.name)
-                    errors.append(f"{input_field.label} is required")
-                elif input_field.type == 'number' and (not isinstance(inputs[input_field.name], (int, float)) or inputs[input_field.name] < 0):
-                    logger.info(f'❌ CALCULATION ENGINE DEBUG - Invalid number input: {input_field.name} = {inputs[input_field.name]}')
+            if not input_field.required:
+                continue
+            if input_field.name in motor_skip_required:
+                continue
+
+            value = inputs.get(input_field.name)
+            if (value is None or value == "") and input_field.name in sovereign_aliases:
+                for alt in sovereign_aliases[input_field.name]:
+                    if inputs.get(alt) is not None and inputs.get(alt) != "":
+                        value = inputs.get(alt)
+                        break
+            if (value is None or value == "") and input_field.name in property_aliases:
+                for alt in property_aliases[input_field.name]:
+                    if inputs.get(alt) is not None and inputs.get(alt) != "":
+                        value = inputs.get(alt)
+                        break
+
+            logger.info(
+                f'🔍 CALCULATION ENGINE DEBUG - Checking required input: {input_field.name} = {value}'
+            )
+            if value is None or value == "":
+                logger.info(f'❌ CALCULATION ENGINE DEBUG - Missing required input: {input_field.name}')
+                missing_inputs.append(input_field.name)
+                errors.append(f"{input_field.label} is required")
+            elif input_field.type.value == "number" or input_field.type == "number":
+                try:
+                    num_val = float(value)
+                except (TypeError, ValueError):
+                    num_val = None
+                if num_val is None or num_val < 0:
+                    logger.info(
+                        f'❌ CALCULATION ENGINE DEBUG - Invalid number input: {input_field.name} = {value}'
+                    )
                     errors.append(f"{input_field.label} must be a non-negative number")
                 else:
-                    logger.info(f'✅ CALCULATION ENGINE DEBUG - Valid required input: {input_field.name} = {inputs[input_field.name]}')
-        
+                    logger.info(
+                        f'✅ CALCULATION ENGINE DEBUG - Valid required input: {input_field.name} = {value}'
+                    )
+            else:
+                logger.info(
+                    f'✅ CALCULATION ENGINE DEBUG - Valid required input: {input_field.name} = {value}'
+                )
+
         # Check input validation rules
         for input_field in formula.inputs:
             if input_field.name in inputs and input_field.validation:
                 value = inputs[input_field.name]
-                
+
                 if 'min' in input_field.validation and value < input_field.validation['min']:
                     errors.append(f"{input_field.label} must be at least {input_field.validation['min']}")
-                
+
                 if 'max' in input_field.validation and value > input_field.validation['max']:
                     errors.append(f"{input_field.label} must be at most {input_field.validation['max']}")
-                
+
                 if 'pattern' in input_field.validation and isinstance(value, str):
                     import re
                     if not re.match(input_field.validation['pattern'], value):
                         errors.append(f"{input_field.label} format is invalid")
-        
+
         # Add formula-specific validations
         self._add_formula_specific_validations(formula, inputs, errors, warnings)
-        
+
         # DEBUG: Log final validation result
         logger.info('🔍 CALCULATION ENGINE DEBUG - Final validation result:')
         logger.info(f'🔍 CALCULATION ENGINE DEBUG - Is Valid: {len(errors) == 0}')
         logger.info(f'🔍 CALCULATION ENGINE DEBUG - Errors: {errors}')
         logger.info(f'🔍 CALCULATION ENGINE DEBUG - Missing Inputs: {missing_inputs}')
-        
+
         return FormulaValidationResult(
             is_valid=len(errors) == 0,
             errors=errors,
@@ -333,13 +405,142 @@ class CalculationEngine:
         """
         Execute the actual calculation based on formula type
         """
-        # This is where the specific formula calculations would be implemented
-        # For now, we'll implement a basic structure that can be extended
-        
+        # Motor vehicle — multi-vehicle PCAF (SPA parity)
+        if formula.category == FormulaCategory.MOTOR_VEHICLE_LOAN:
+            fuel_path = bool((formula.metadata or {}).get("fuel_path")) or formula.option_code == "1a"
+            methodologies = {
+                "1a": "PCAF Option 1a - Actual Vehicle Fuel Consumption (Motor Vehicle Loan)",
+                "1b": "PCAF Option 1b - Actual Distance Traveled (Motor Vehicle Loan)",
+                "2a": "PCAF Option 2a - Local Statistical Distance (Motor Vehicle Loan)",
+                "2b": "PCAF Option 2b - Regional Statistical Distance (Motor Vehicle Loan)",
+                "3a": "PCAF Option 3a - Combined EPA Emission Factors (Motor Vehicle Loan)",
+                "3b": "PCAF Option 3b - Average Vehicle Efficiency (Motor Vehicle Loan)",
+            }
+            notes = (formula.notes or [""])[0] if formula.notes else formula.description
+            raw = run_motor_vehicle_calculation(
+                inputs,
+                company_type.value,
+                formula.option_code,
+                formula.data_quality_score,
+                methodologies.get(formula.option_code, formula.description),
+                notes or formula.description,
+                fuel_path=fuel_path,
+            )
+            steps = [
+                CalculationStep(step=s["step"], value=s["value"], formula=s["formula"])
+                for s in raw["calculation_steps"]
+            ]
+            meta = dict(raw.get("metadata") or {})
+            meta.update(
+                {
+                    "formula_id": formula.id,
+                    "formula_name": formula.name,
+                    "company_type": company_type.value,
+                    "option_code": formula.option_code,
+                }
+            )
+            return CalculationResult(
+                attribution_factor=raw["attribution_factor"],
+                emission_factor=raw["emission_factor"],
+                financed_emissions=raw["financed_emissions"],
+                data_quality_score=raw["data_quality_score"],
+                methodology=raw["methodology"],
+                calculation_steps=steps,
+                metadata=meta,
+            )
+
+        # Sovereign debt — Outstanding / PPP-GDP × country emissions (SPA parity)
+        if formula.category == FormulaCategory.SOVEREIGN_DEBT:
+            methodologies = {
+                "1a": "PCAF Option 1a - Verified Country Emissions (Sovereign Debt)",
+                "1b": "PCAF Option 1b - Unverified Country Emissions (Sovereign Debt)",
+                "2a": "PCAF Option 2a - Country Energy Consumption (Sovereign Debt)",
+                "3a": "PCAF Option 3a - Country Sector Intensity (Sovereign Debt)",
+                "3b": "PCAF Option 3b - Proxy Country Intensity (Sovereign Debt)",
+            }
+            raw = run_sovereign_calculation(
+                formula.id,
+                formula.option_code,
+                formula.data_quality_score,
+                methodologies.get(formula.option_code, formula.description),
+                inputs,
+                company_type.value,
+            )
+            meta = dict(raw.get("metadata") or {})
+            meta.update(
+                {
+                    "formula_id": formula.id,
+                    "formula_name": formula.name,
+                    "company_type": company_type.value,
+                    "option_code": formula.option_code,
+                }
+            )
+            return CalculationResult(
+                attribution_factor=raw["attribution_factor"],
+                emission_factor=raw["emission_factor"],
+                financed_emissions=raw["financed_emissions"],
+                data_quality_score=raw["data_quality_score"],
+                methodology=raw["methodology"],
+                calculation_steps=raw["calculation_steps"],
+                metadata=meta,
+            )
+
+        # CRE + mortgage — Outstanding / Property value × building emissions (SPA parity)
+        if formula.category in (
+            FormulaCategory.COMMERCIAL_REAL_ESTATE,
+            FormulaCategory.MORTGAGE,
+        ):
+            is_mortgage = formula.category == FormulaCategory.MORTGAGE
+            if is_mortgage:
+                methodologies = {
+                    "1a": "PCAF Option 1a - Supplier-Specific Emission Factors (Mortgage)",
+                    "1b": "PCAF Option 1b - Average Emission Factors (Mortgage)",
+                    "2a": "PCAF Option 2a - Energy Labels Data (Mortgage)",
+                    "2b": "PCAF Option 2b - Statistical Data (Mortgage)",
+                    "3": "PCAF Option 3 - Estimated Energy from Statistics × Buildings (Mortgage)",
+                }
+                category = "mortgage"
+            else:
+                methodologies = {
+                    "1a": "PCAF Option 1a - Supplier-Specific Emission Factors (Commercial Real Estate)",
+                    "1b": "PCAF Option 1b - Average Emission Factors (Commercial Real Estate)",
+                    "2a": "PCAF Option 2a - Estimated Energy Consumption from Energy Labels (Commercial Real Estate)",
+                    "2b": "PCAF Option 2b - Estimated Energy Consumption from Statistics (Commercial Real Estate)",
+                    "3": "PCAF Option 3 - Estimated Energy from Statistics × Buildings (Commercial Real Estate)",
+                }
+                category = "commercial_real_estate"
+            raw = run_property_loan_calculation(
+                formula_id=formula.id,
+                option_code=formula.option_code,
+                data_quality_score=formula.data_quality_score,
+                methodology=methodologies.get(formula.option_code, formula.description),
+                category=category,
+                inputs=inputs,
+                company_type=company_type.value,
+            )
+            meta = dict(raw.get("metadata") or {})
+            meta.update(
+                {
+                    "formula_id": formula.id,
+                    "formula_name": formula.name,
+                    "company_type": company_type.value,
+                    "option_code": formula.option_code,
+                }
+            )
+            return CalculationResult(
+                attribution_factor=raw["attribution_factor"],
+                emission_factor=raw["emission_factor"],
+                financed_emissions=raw["financed_emissions"],
+                data_quality_score=raw["data_quality_score"],
+                methodology=raw["methodology"],
+                calculation_steps=raw["calculation_steps"],
+                metadata=meta,
+            )
+
         # Get the denominator based on company type
         denominator = get_denominator_for_company_type(inputs, company_type.value)
         outstanding_amount = inputs.get('outstanding_amount', 0)
-        
+
         # Calculate attribution factor based on formula type
         if formula.category.value == 'facilitated_emission':
             # For facilitated emissions, use facilitated_amount
@@ -354,12 +555,12 @@ class CalculationEngine:
                 attribution_factor = calculate_attribution_factor_listed(outstanding_amount, denominator)
             else:
                 attribution_factor = calculate_attribution_factor_unlisted(outstanding_amount, denominator)
-        
+
         # Calculate financed emissions based on formula type
         financed_emissions, emission_factor, calculation_steps = self._calculate_emissions(
             formula, inputs, outstanding_amount, denominator, company_type
         )
-        
+
         return CalculationResult(
             attribution_factor=attribution_factor,
             emission_factor=emission_factor,

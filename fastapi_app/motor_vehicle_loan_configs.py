@@ -1,168 +1,193 @@
 """
-Motor Vehicle Loan Formula Configurations - Migrated from TypeScript
-This file contains all PCAF formulas for Motor Vehicle Loans.
+Motor Vehicle Loan Formula Configurations — aligned with SPA PCAF Table 10.1-6.
 
-Migrated from: src/pages/finance_facilitated/config/motorVehicleLoanFormulaConfigs.ts
-No formulas or working logic has been changed - only converted from TypeScript to Python.
+Scores: 1a=1, 1b=1, 2a=2, 2b=3, 3a=4, 3b=5
+Calc: multi-vehicle Σ (Outstanding_v / Value_v) × Emissions_v via motor_vehicle_pcaf.
 """
 
 from .finance_models import FormulaConfig, FormulaInput, FormulaInputType, FormulaCategory, ScopeType
-from .shared_formula_utils import (
-    calculate_attribution_factor,
-    calculate_financed_emissions
+
+outstanding_amount_input = FormulaInput(
+    name="outstanding_amount",
+    label="Outstanding Amount",
+    type=FormulaInputType.NUMBER,
+    required=True,
+    unit="PKR",
+    description="Outstanding amount on the motor vehicle loan",
 )
 
-# ============================================================================
-# MOTOR VEHICLE LOAN FORMULA CONFIGURATIONS
-# ============================================================================
+value_at_origination_input = FormulaInput(
+    name="total_value_at_origination",
+    label="Total Value at Origination",
+    type=FormulaInputType.NUMBER,
+    required=False,
+    unit="PKR",
+    description="Sum of vehicle values at origination (from vehicle rows or aggregate)",
+)
+
+vehicle_entries_input = FormulaInput(
+    name="vehicle_entries",
+    label="Vehicle entries",
+    type=FormulaInputType.TEXT,
+    required=False,
+    description="Per-vehicle value, emissions, and optional outstanding (JSON array)",
+)
+
+fuel_consumption_input = FormulaInput(
+    name="fuel_consumption",
+    label="Actual Fuel Consumption",
+    type=FormulaInputType.NUMBER,
+    required=False,
+    unit="L",
+    description="Aggregate fallback when vehicle_entries absent",
+)
+
+distance_input = FormulaInput(
+    name="distance_traveled",
+    label="Distance Traveled",
+    type=FormulaInputType.NUMBER,
+    required=False,
+    unit="km",
+    description="Aggregate fallback when vehicle_entries absent",
+)
+
+efficiency_input = FormulaInput(
+    name="efficiency",
+    label="Fuel Efficiency",
+    type=FormulaInputType.NUMBER,
+    required=False,
+    unit="L/km",
+    description="Aggregate fallback when vehicle_entries absent",
+)
+
+emission_factor_input = FormulaInput(
+    name="emission_factor",
+    label="Fuel Emission Factor",
+    type=FormulaInputType.NUMBER,
+    required=False,
+    unit="tCO2e/L",
+    description="Aggregate fallback when vehicle_entries absent",
+)
+
+total_vehicle_emissions_input = FormulaInput(
+    name="total_vehicle_emissions",
+    label="Total Vehicle Emissions",
+    type=FormulaInputType.NUMBER,
+    required=False,
+    unit="tCO2e",
+    description="Aggregated vehicle emissions from the vehicle form",
+)
+
+_COMMON_FUEL = [
+    outstanding_amount_input,
+    value_at_origination_input,
+    vehicle_entries_input,
+    fuel_consumption_input,
+    emission_factor_input,
+    total_vehicle_emissions_input,
+]
+
+_COMMON_DISTANCE = [
+    outstanding_amount_input,
+    value_at_origination_input,
+    vehicle_entries_input,
+    distance_input,
+    efficiency_input,
+    emission_factor_input,
+    total_vehicle_emissions_input,
+]
+
 
 def create_motor_vehicle_loan_formulas():
-    """Create all motor vehicle loan formula configurations"""
-    
-    # Common inputs for motor vehicle loans
-    outstanding_amount_input = FormulaInput(
-        name='outstanding_amount',
-        label='Outstanding Amount',
-        type=FormulaInputType.NUMBER,
-        required=True,
-        unit='PKR',
-        description='Outstanding amount in the motor vehicle loan'
-    )
-    
-    vehicle_value_input = FormulaInput(
-        name='total_value_at_origination',
-        label='Total Value at Origination',
-        type=FormulaInputType.NUMBER,
-        required=True,
-        unit='PKR',
-        description='Total value of the vehicle at the time of loan origination'
-    )
-    
     return [
-        # OPTION 1A - PRIMARY DATA ON ACTUAL VEHICLE FUEL CONSUMPTION
         FormulaConfig(
-            id='1a-motor-vehicle',
-            name='Option 1a - Primary Data on Actual Vehicle Fuel Consumption (Motor Vehicle Loan)',
-            description='Primary data on actual vehicle fuel consumption',
+            id="1a-motor-vehicle",
+            name="Option 1a - Actual Fuel Consumption (Motor Vehicle Loan)",
+            description=(
+                "Primary data on actual vehicle fuel consumption × EPA Mobile Fuel "
+                "emission factor by fuel type"
+            ),
             category=FormulaCategory.MOTOR_VEHICLE_LOAN,
-            option_code='1a',
+            option_code="1a",
             data_quality_score=1,
-            inputs=[
-                outstanding_amount_input,
-                vehicle_value_input,
-                FormulaInput(
-                    name='fuel_consumption',
-                    label='Fuel Consumption',
-                    type=FormulaInputType.NUMBER,
-                    required=True,
-                    unit='L',
-                    description='Primary data on actual vehicle fuel consumption'
-                ),
-                FormulaInput(
-                    name='emission_factor',
-                    label='Emission Factor',
-                    type=FormulaInputType.NUMBER,
-                    required=True,
-                    unit='tCO2e/L',
-                    description='Emission factor for the fuel type'
-                )
-            ],
-            applicable_scopes=[ScopeType.SCOPE1]
+            inputs=_COMMON_FUEL,
+            applicable_scopes=[ScopeType.SCOPE1],
+            notes=["fuel_path", "Σ_v (Outstanding_v / Value_v) × Fuel_v × EF_f"],
+            metadata={"fuel_path": True},
         ),
-        
-        # OPTION 1B - AVERAGE EMISSION FACTORS
         FormulaConfig(
-            id='1b-motor-vehicle',
-            name='Option 1b - Average Emission Factors (Motor Vehicle Loan)',
-            description='Average emission factors for the fuel type + Primary data on actual vehicle fuel consumption',
+            id="1b-motor-vehicle",
+            name="Option 1b - Actual Distance + Make/Model Efficiency (Motor Vehicle Loan)",
+            description=(
+                "User-entered distance × make/model efficiency × EPA Mobile Fuel emission factor"
+            ),
             category=FormulaCategory.MOTOR_VEHICLE_LOAN,
-            option_code='1b',
+            option_code="1b",
+            data_quality_score=1,
+            inputs=_COMMON_DISTANCE,
+            applicable_scopes=[ScopeType.SCOPE1],
+            notes=["distance_path"],
+            metadata={"fuel_path": False},
+        ),
+        FormulaConfig(
+            id="2a-motor-vehicle",
+            name="Option 2a - Local Distance Statistics (Motor Vehicle Loan)",
+            description=(
+                "Local distance stats × make/model efficiency × EPA Mobile Fuel emission factor"
+            ),
+            category=FormulaCategory.MOTOR_VEHICLE_LOAN,
+            option_code="2a",
             data_quality_score=2,
-            inputs=[
-                outstanding_amount_input,
-                vehicle_value_input,
-                FormulaInput(
-                    name='fuel_consumption',
-                    label='Fuel Consumption',
-                    type=FormulaInputType.NUMBER,
-                    required=True,
-                    unit='L',
-                    description='Primary data on actual vehicle fuel consumption'
-                ),
-                FormulaInput(
-                    name='average_emission_factor',
-                    label='Average Emission Factor',
-                    type=FormulaInputType.NUMBER,
-                    required=True,
-                    unit='tCO2e/L',
-                    description='Average emission factors for the fuel type'
-                )
-            ],
-            applicable_scopes=[ScopeType.SCOPE1]
+            inputs=_COMMON_DISTANCE,
+            applicable_scopes=[ScopeType.SCOPE1],
+            notes=["distance_path"],
+            metadata={"fuel_path": False},
         ),
-        
-        # OPTION 2A - ESTIMATED FUEL CONSUMPTION FROM VEHICLE SPECIFICATIONS
         FormulaConfig(
-            id='2a-motor-vehicle',
-            name='Option 2a - Estimated Fuel Consumption from Vehicle Specifications (Motor Vehicle Loan)',
-            description='Estimated fuel consumption based on vehicle specifications',
+            id="2b-motor-vehicle",
+            name="Option 2b - Regional Distance Statistics (Motor Vehicle Loan)",
+            description=(
+                "Regional distance stats × make/model efficiency × EPA Mobile Fuel emission factor"
+            ),
             category=FormulaCategory.MOTOR_VEHICLE_LOAN,
-            option_code='2a',
+            option_code="2b",
             data_quality_score=3,
-            inputs=[
-                outstanding_amount_input,
-                vehicle_value_input,
-                FormulaInput(
-                    name='estimated_fuel_consumption_from_specifications',
-                    label='Estimated Fuel Consumption from Vehicle Specifications',
-                    type=FormulaInputType.NUMBER,
-                    required=True,
-                    unit='L',
-                    description='Estimated fuel consumption based on vehicle specifications'
-                ),
-                FormulaInput(
-                    name='average_emission_factor',
-                    label='Average Emission Factor',
-                    type=FormulaInputType.NUMBER,
-                    required=True,
-                    unit='tCO2e/L',
-                    description='Average emission factors for the fuel type'
-                )
-            ],
-            applicable_scopes=[ScopeType.SCOPE1]
+            inputs=_COMMON_DISTANCE,
+            applicable_scopes=[ScopeType.SCOPE1],
+            notes=["distance_path"],
+            metadata={"fuel_path": False},
         ),
-        
-        # OPTION 2B - ESTIMATED FUEL CONSUMPTION FROM STATISTICS
         FormulaConfig(
-            id='2b-motor-vehicle',
-            name='Option 2b - Estimated Fuel Consumption from Statistics (Motor Vehicle Loan)',
-            description='Estimated fuel consumption based on vehicle statistics',
+            id="3a-motor-vehicle",
+            name="Option 3a - Combined EPA Vehicle Factors (Motor Vehicle Loan)",
+            description=(
+                "Statistical distance × vehicle-type efficiency × EPA EF "
+                "(Table 3/4/Mobile/Non-Road)"
+            ),
             category=FormulaCategory.MOTOR_VEHICLE_LOAN,
-            option_code='2b',
+            option_code="3a",
             data_quality_score=4,
-            inputs=[
-                outstanding_amount_input,
-                vehicle_value_input,
-                FormulaInput(
-                    name='estimated_fuel_consumption_from_statistics',
-                    label='Estimated Fuel Consumption from Statistics',
-                    type=FormulaInputType.NUMBER,
-                    required=True,
-                    unit='L',
-                    description='Estimated fuel consumption based on vehicle statistics'
-                ),
-                FormulaInput(
-                    name='average_emission_factor',
-                    label='Average Emission Factor',
-                    type=FormulaInputType.NUMBER,
-                    required=True,
-                    unit='tCO2e/L',
-                    description='Average emission factors for the fuel type'
-                )
-            ],
-            applicable_scopes=[ScopeType.SCOPE1]
-        )
+            inputs=_COMMON_DISTANCE,
+            applicable_scopes=[ScopeType.SCOPE1],
+            notes=["distance_path"],
+            metadata={"fuel_path": False},
+        ),
+        FormulaConfig(
+            id="3b-motor-vehicle",
+            name="Option 3b - Average Vehicle Efficiency (Motor Vehicle Loan)",
+            description=(
+                "Distance from vehicle-use stats × efficiency by engine CC band × "
+                "EPA Mobile Fuel emission factor"
+            ),
+            category=FormulaCategory.MOTOR_VEHICLE_LOAN,
+            option_code="3b",
+            data_quality_score=5,
+            inputs=_COMMON_DISTANCE,
+            applicable_scopes=[ScopeType.SCOPE1],
+            notes=["distance_path"],
+            metadata={"fuel_path": False},
+        ),
     ]
 
-# Export the formulas
+
 MOTOR_VEHICLE_LOAN_FORMULAS = create_motor_vehicle_loan_formulas()

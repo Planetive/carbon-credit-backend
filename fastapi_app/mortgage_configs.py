@@ -1,168 +1,191 @@
 """
-Mortgage Formula Configurations - Migrated from TypeScript
-This file contains all PCAF formulas for Mortgage loans.
+Mortgage Formula Configurations — aligned with SPA PCAF Table 10.1-5.
 
-Migrated from: src/pages/finance_facilitated/config/mortgageFormulaConfigs.ts
-No formulas or working logic has been changed - only converted from TypeScript to Python.
+Scores: 1a=1, 1b=2, 2a=3, 2b=4, 3=5
+Attribution: Outstanding / Property value at origination
+(Same math as commercial real estate; category label differs.)
 """
 
 from .finance_models import FormulaConfig, FormulaInput, FormulaInputType, FormulaCategory, ScopeType
-from .shared_formula_utils import (
-    calculate_attribution_factor,
-    calculate_financed_emissions
+
+outstanding_amount_input = FormulaInput(
+    name="outstanding_amount",
+    label="Outstanding Amount",
+    type=FormulaInputType.NUMBER,
+    required=True,
+    unit="PKR",
+    description="Outstanding amount in the mortgage loan",
 )
 
-# ============================================================================
-# MORTGAGE FORMULA CONFIGURATIONS
-# ============================================================================
+property_value_input = FormulaInput(
+    name="property_value_at_origination",
+    label="Property Value at Origination",
+    type=FormulaInputType.NUMBER,
+    required=True,
+    unit="PKR",
+    description="Property value at the time of mortgage origination",
+)
+
 
 def create_mortgage_formulas():
-    """Create all mortgage formula configurations"""
-    
-    # Common inputs for mortgage
-    outstanding_amount_input = FormulaInput(
-        name='outstanding_amount',
-        label='Outstanding Amount',
-        type=FormulaInputType.NUMBER,
-        required=True,
-        unit='PKR',
-        description='Outstanding amount in the mortgage loan'
-    )
-    
-    property_value_input = FormulaInput(
-        name='property_value_at_origination',
-        label='Property Value at Origination',
-        type=FormulaInputType.NUMBER,
-        required=True,
-        unit='PKR',
-        description='Value of the property at the time of mortgage origination'
-    )
-    
     return [
-        # OPTION 1A - SUPPLIER-SPECIFIC EMISSION FACTORS
         FormulaConfig(
-            id='1a-mortgage',
-            name='Option 1a - Supplier-Specific Emission Factors (Mortgage)',
-            description='Supplier-specific emission factors specific to the energy source + Primary data on actual building energy consumption',
+            id="1a-mortgage",
+            name="Option 1a - Supplier-Specific Emission Factors (Mortgage)",
+            description="Primary data on actual building energy consumption with supplier-specific emission factors",
             category=FormulaCategory.MORTGAGE,
-            option_code='1a',
+            option_code="1a",
             data_quality_score=1,
             inputs=[
                 outstanding_amount_input,
                 property_value_input,
                 FormulaInput(
-                    name='actual_energy_consumption',
-                    label='Actual Energy Consumption',
+                    name="energy_consumption",
+                    label="Actual building energy consumption",
                     type=FormulaInputType.NUMBER,
                     required=True,
-                    unit='kWh',
-                    description='Primary data on actual building energy consumption'
+                    unit="kWh",
                 ),
                 FormulaInput(
-                    name='supplier_specific_emission_factor',
-                    label='Supplier Specific Emission Factor',
+                    name="emission_factor",
+                    label="Emission Factor",
                     type=FormulaInputType.NUMBER,
                     required=True,
-                    unit='tCO2e/kWh',
-                    description='Supplier-specific emission factors specific to the energy source'
-                )
+                    unit="tCO2e/kWh",
+                ),
             ],
-            applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2]
+            applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2],
         ),
-        
-        # OPTION 1B - AVERAGE EMISSION FACTORS
         FormulaConfig(
-            id='1b-mortgage',
-            name='Option 1b - Average Emission Factors (Mortgage)',
-            description='Average emission factors for the energy source + Primary data on actual building energy consumption',
+            id="1b-mortgage",
+            name="Option 1b - Average Emission Factors (Mortgage)",
+            description="Primary data on actual building energy consumption with average grid emission factors",
             category=FormulaCategory.MORTGAGE,
-            option_code='1b',
+            option_code="1b",
             data_quality_score=2,
             inputs=[
                 outstanding_amount_input,
                 property_value_input,
                 FormulaInput(
-                    name='actual_energy_consumption',
-                    label='Actual Energy Consumption',
+                    name="energy_consumption",
+                    label="Actual building energy consumption",
                     type=FormulaInputType.NUMBER,
                     required=True,
-                    unit='kWh',
-                    description='Primary data on actual building energy consumption'
+                    unit="kWh",
                 ),
                 FormulaInput(
-                    name='average_emission_factor',
-                    label='Average Emission Factor',
+                    name="emission_factor",
+                    label="Average Grid Emission Factor",
                     type=FormulaInputType.NUMBER,
                     required=True,
-                    unit='tCO2e/kWh',
-                    description='Average emission factors for the energy source'
-                )
+                    unit="tCO2e/kWh",
+                ),
             ],
-            applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2]
+            applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2],
         ),
-        
-        # OPTION 2A - ESTIMATED ENERGY CONSUMPTION FROM LABELS
         FormulaConfig(
-            id='2a-mortgage',
-            name='Option 2a - Estimated Energy Consumption from Labels (Mortgage)',
-            description='Estimated energy consumption based on energy labels or certificates',
+            id="2a-mortgage",
+            name="Option 2a - Energy Labels Data (Mortgage)",
+            description="Energy labels intensity × floor area financed × average grid factor",
             category=FormulaCategory.MORTGAGE,
-            option_code='2a',
+            option_code="2a",
             data_quality_score=3,
             inputs=[
                 outstanding_amount_input,
                 property_value_input,
                 FormulaInput(
-                    name='estimated_energy_consumption_from_labels',
-                    label='Estimated Energy Consumption from Labels',
+                    name="estimated_energy_consumption_from_labels",
+                    label="Estimated Energy Consumption of Whole Building",
                     type=FormulaInputType.NUMBER,
                     required=True,
-                    unit='kWh',
-                    description='Estimated energy consumption based on energy labels or certificates'
+                    unit="kWh/m²",
                 ),
                 FormulaInput(
-                    name='average_emission_factor',
-                    label='Average Emission Factor',
+                    name="floor_area",
+                    label="Floor Area Financed",
                     type=FormulaInputType.NUMBER,
                     required=True,
-                    unit='tCO2e/kWh',
-                    description='Average emission factors for the energy source'
-                )
+                    unit="m²",
+                ),
+                FormulaInput(
+                    name="average_emission_factor",
+                    label="Average Grid Emission Factor",
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit="tCO2e/kWh",
+                ),
             ],
-            applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2]
+            applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2],
         ),
-        
-        # OPTION 2B - ESTIMATED ENERGY CONSUMPTION FROM STATISTICS
         FormulaConfig(
-            id='2b-mortgage',
-            name='Option 2b - Estimated Energy Consumption from Statistics (Mortgage)',
-            description='Estimated energy consumption based on building statistics',
+            id="2b-mortgage",
+            name="Option 2b - Statistical Data (Mortgage)",
+            description="Statistics intensity × floor area × average emission factor",
             category=FormulaCategory.MORTGAGE,
-            option_code='2b',
-            data_quality_score=3,
+            option_code="2b",
+            data_quality_score=4,
             inputs=[
                 outstanding_amount_input,
                 property_value_input,
                 FormulaInput(
-                    name='estimated_energy_consumption_from_statistics',
-                    label='Estimated Energy Consumption from Statistics',
+                    name="estimated_energy_consumption_from_statistics",
+                    label="Estimated Energy Consumption from Statistics",
                     type=FormulaInputType.NUMBER,
                     required=True,
-                    unit='kWh',
-                    description='Estimated energy consumption based on building statistics'
+                    unit="kWh/sqft",
                 ),
                 FormulaInput(
-                    name='average_emission_factor',
-                    label='Average Emission Factor',
+                    name="floor_area",
+                    label="Floor Area",
                     type=FormulaInputType.NUMBER,
                     required=True,
-                    unit='tCO2e/kWh',
-                    description='Average emission factors for the energy source'
-                )
+                    unit="sqft",
+                ),
+                FormulaInput(
+                    name="average_emission_factor",
+                    label="Average Emission Factor",
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit="tCO2e/kWh",
+                ),
             ],
-            applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2]
-        )
+            applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2],
+        ),
+        FormulaConfig(
+            id="3-mortgage",
+            name="Option 3 - Estimated Energy from Statistics × Buildings (Mortgage)",
+            description="Statistics energy per building × number of buildings × average emission factor",
+            category=FormulaCategory.MORTGAGE,
+            option_code="3",
+            data_quality_score=5,
+            inputs=[
+                outstanding_amount_input,
+                property_value_input,
+                FormulaInput(
+                    name="estimated_energy_consumption_from_statistics",
+                    label="Estimated Energy Consumption from Statistics",
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit="kWh/building",
+                ),
+                FormulaInput(
+                    name="number_of_buildings",
+                    label="Number of Buildings",
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit="buildings",
+                ),
+                FormulaInput(
+                    name="average_emission_factor",
+                    label="Average Emission Factor",
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit="tCO2e/kWh",
+                ),
+            ],
+            applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2],
+        ),
     ]
 
-# Export the formulas
+
 MORTGAGE_FORMULAS = create_mortgage_formulas()

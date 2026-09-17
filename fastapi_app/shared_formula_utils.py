@@ -262,7 +262,8 @@ def get_denominator_for_company_type(inputs: Dict[str, Any], company_type: str) 
         'property_value_at_origination',  # Commercial real estate, mortgage
         'total_value_at_origination',     # Motor vehicle loans
         'total_project_equity_plus_debt', # Project finance
-        'ppp_adjusted_gdp'                # Sovereign debt
+        'ppp_adjusted_gdp',               # Sovereign debt
+        'pp_adjusted_gdp',                # Sovereign debt (SPA alias)
     ]
     
     # Add formula-specific denominators to the list
