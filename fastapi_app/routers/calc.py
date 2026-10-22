@@ -9,18 +9,22 @@ from decimal import Decimal
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from ..auth_org import OrgContext
 from ..db import get_db
 from ..factor_service import (
     factor_row_to_legacy_record,
+    fetch_all_rows_for_dataset,
     get_row_by_id,
     load_legacy_sheet,
     load_legacy_sheets,
+    resolve_dataset,
 )
 from ..ghg_calc.epa_fuel import build_epa_fuel_map, calculate_epa_fuel
+from ..ghg_calc.stationary_combustion import calculate_stationary_combustion
+from ..ghg_calc.stationary_records import save_epa_stationary_record
 from ..ghg_calc.heat_steam import build_heat_steam_rows, calculate_heat_steam
 from ..ghg_calc.mobile_fuel import build_mobile_options, calculate_mobile_fuel
 from ..ghg_calc.non_road import build_non_road_rows, calculate_non_road
@@ -66,6 +70,36 @@ class EpaFuelCalcRequest(BaseModel):
     factor_row_id: Optional[uuid.UUID] = None
     assessment_id: Optional[uuid.UUID] = None
     persist: bool = False
+
+
+class EpaStationaryCalcRequest(BaseModel):
+    """Authoritative stationary request. Extra fields such as factor are ignored."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    fuel: str
+    quantity: Decimal
+    unit: str
+    category: Optional[str] = None
+    gwp_version: str = "AR5"
+
+
+class EpaStationarySaveRequest(BaseModel):
+    """Save request. Client factor and emissions fields are ignored."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    fuel: str
+    quantity: Decimal
+    unit: str
+    assessment_id: uuid.UUID
+    equipment_type: str
+    category: Optional[str] = None
+    gwp_version: str = "AR5"
+    counterparty_id: Optional[uuid.UUID] = None
+    site: Optional[str] = None
+    equipment_id: Optional[str] = None
+    period: Optional[str] = None
 
 
 class SimpleMultiplyRequest(BaseModel):
@@ -347,6 +381,130 @@ def calc_epa_fuel(
         )
         result["activity_id"] = str(act.id)
     return result
+
+
+_STATIONARY_DATASETS = (
+    {
+        "codes": ["fuel_epa_1", "fuel_epa1"],
+        "hints": ["Fuel EPA 1"],
+    },
+    {
+        "codes": ["fuel_epa_2", "fuel_epa2"],
+        "hints": ["Fuel EPA 2"],
+    },
+    {
+        "codes": ["fuel_epa_3", "fuel_epa3"],
+        "hints": ["Fuel EPA 3"],
+    },
+)
+
+
+def _stationary_factor_sheets(db: Session) -> list:
+    sheets = []
+    for spec in _STATIONARY_DATASETS:
+        dataset = resolve_dataset(db, spec["codes"], spec["hints"])
+        if dataset is None:
+            continue
+        rows = fetch_all_rows_for_dataset(db, dataset.id)
+        sheets.append(
+            {
+                "publisher": dataset.publisher,
+                "dataset_code": dataset.code,
+                "dataset_title": dataset.title,
+                "version_label": dataset.version_label,
+                "effective_from": (
+                    dataset.effective_from.isoformat() if dataset.effective_from else None
+                ),
+                "effective_to": (
+                    dataset.effective_to.isoformat() if dataset.effective_to else None
+                ),
+                "dataset_id": str(dataset.id),
+                "source_notes": dataset.source_notes,
+                "rows": [
+                    {
+                        **factor_row_to_legacy_record(row),
+                        "_factor_row_id": str(row.id),
+                        "_factor_dataset_id": str(dataset.id),
+                    }
+                    for row in rows
+                ],
+            }
+        )
+    return sheets
+
+
+@router.post("/epa/stationary")
+def calc_epa_stationary(
+    body: EpaStationaryCalcRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    All-gas stationary combustion. Does not read a client factor and does not
+    write emission records.
+    """
+    del ctx
+    return _raise_if_failed(
+        calculate_stationary_combustion(
+            fuel=body.fuel,
+            quantity=body.quantity,
+            unit=body.unit,
+            category=body.category,
+            gwp_version=body.gwp_version,
+            sheets=_stationary_factor_sheets(db),
+        ),
+        "EPA stationary combustion",
+    )
+
+
+@router.post("/epa/stationary/records", status_code=status.HTTP_201_CREATED)
+def create_epa_stationary_record(
+    body: EpaStationarySaveRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return save_epa_stationary_record(
+        db,
+        ctx,
+        sheets=_stationary_factor_sheets(db),
+        fuel=body.fuel,
+        quantity=body.quantity,
+        unit=body.unit,
+        category=body.category,
+        gwp_version=body.gwp_version,
+        assessment_id=body.assessment_id,
+        counterparty_id=body.counterparty_id,
+        equipment_type=body.equipment_type,
+        site=body.site,
+        equipment_id=body.equipment_id,
+        period=body.period,
+    )
+
+
+@router.patch("/epa/stationary/records/{activity_id}")
+def update_epa_stationary_record(
+    activity_id: uuid.UUID,
+    body: EpaStationarySaveRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return save_epa_stationary_record(
+        db,
+        ctx,
+        sheets=_stationary_factor_sheets(db),
+        fuel=body.fuel,
+        quantity=body.quantity,
+        unit=body.unit,
+        category=body.category,
+        gwp_version=body.gwp_version,
+        assessment_id=body.assessment_id,
+        counterparty_id=body.counterparty_id,
+        equipment_type=body.equipment_type,
+        site=body.site,
+        equipment_id=body.equipment_id,
+        period=body.period,
+        activity_id=activity_id,
+    )
 
 
 def _simple_multiply(quantity: float, factor: float) -> Dict[str, Any]:

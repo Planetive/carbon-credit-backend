@@ -66,6 +66,7 @@ def list_activities(
     assessment_id: Optional[uuid.UUID] = None,
     scope: Optional[int] = Query(default=None, ge=1, le=3),
     category: Optional[str] = None,
+    legacy_source: Optional[str] = None,
     ctx: OrgContext = Depends(require_org_context),
     db: Session = Depends(get_db),
 ) -> List[EmissionActivity]:
@@ -78,6 +79,8 @@ def list_activities(
         q = q.filter(EmissionActivity.scope == scope)
     if category:
         q = q.filter(EmissionActivity.category == category)
+    if legacy_source:
+        q = q.filter(EmissionActivity.legacy_source == legacy_source)
     return q.order_by(EmissionActivity.created_at.asc()).all()
 
 
@@ -102,8 +105,8 @@ def create_activity(
         factor_row_id=body.factor_row_id,
         emissions_tco2e=body.emissions_tco2e,
         raw=body.raw or {},
-        legacy_source="api",
-        legacy_id=None,
+        legacy_source=(body.legacy_source or "api").strip(),
+        legacy_id=body.legacy_id,
     )
     db.add(row)
     try:

@@ -6,6 +6,7 @@ from .epa_fuel import (
     calculate_epa_fuel,
     calculate_epa_fuel_emissions,
 )
+from .stationary_combustion import calculate_stationary_combustion
 from .epa_refrigerant import calculate_epa_refrigerant
 from .heat_steam import build_heat_steam_rows, calculate_heat_steam
 from .mobile_fuel import build_mobile_options, calculate_mobile_fuel
@@ -38,6 +39,7 @@ __all__ = [
     "build_epa_fuel_map",
     "calculate_epa_fuel",
     "calculate_epa_fuel_emissions",
+    "calculate_stationary_combustion",
     "build_mobile_options",
     "calculate_mobile_fuel",
     "build_on_road_gasoline_rows",

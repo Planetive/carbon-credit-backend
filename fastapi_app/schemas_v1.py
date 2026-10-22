@@ -235,6 +235,11 @@ class EmissionActivityCreate(BaseModel):
     factor_row_id: Optional[uuid.UUID] = None
     emissions_tco2e: Optional[Decimal] = None
     raw: Optional[Dict[str, Any]] = None
+    legacy_source: Optional[str] = Field(
+        default=None,
+        description="Original Supabase table name, e.g. scope1_fuel_entries",
+    )
+    legacy_id: Optional[uuid.UUID] = None
 
 
 class EmissionActivityUpdate(BaseModel):

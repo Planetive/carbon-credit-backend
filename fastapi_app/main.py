@@ -9,7 +9,7 @@ from .models import (
     FacilitatedEmissionResponse,
     ScenarioRequest,
     ScenarioResponse,
-)
+)   
 from .calculation_engine import CalculationEngine
 from .scenario_engine import ScenarioEngine
 from .auth_routes import router as auth_router
