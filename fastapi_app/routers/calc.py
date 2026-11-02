@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from ..auth_org import OrgContext
@@ -26,6 +26,20 @@ from ..ghg_calc.epa_fuel import build_epa_fuel_map, calculate_epa_fuel
 from ..ghg_calc.stationary_combustion import calculate_stationary_combustion
 from ..ghg_calc.stationary_records import save_epa_stationary_record
 from ..ghg_calc.heat_steam import build_heat_steam_rows, calculate_heat_steam
+from ..ghg_calc.mobile_combustion import calculate_mobile_combustion, load_mobile_factor_sheets
+from ..ghg_calc.refrigerant_leakage import (
+    calculate_refrigerant_leakage,
+    load_refrigerant_factor_sheets,
+)
+from ..ghg_calc.refrigerant_records import save_epa_refrigerant_record
+from ..ghg_calc.mobile_records import save_epa_mobile_record
+from ..ghg_calc.scope2_electricity import calculate_location_electricity
+from ..ghg_calc.scope2_electricity_records import save_scope2_electricity_record
+from ..ghg_calc.scope2_heat_steam import calculate_purchased_heat_steam
+from ..ghg_calc.scope2_heat_steam_records import save_scope2_heat_steam_record
+from ..ghg_calc.scope2_uk_electricity import calculate_uk_location_electricity
+from ..ghg_calc.scope2_uk_heat_steam import calculate_uk_purchased_heat_steam
+from ..ghg_calc.scope2_uk_records import save_uk_electricity_record, save_uk_heat_steam_record
 from ..ghg_calc.mobile_fuel import build_mobile_options, calculate_mobile_fuel
 from ..ghg_calc.non_road import build_non_road_rows, calculate_non_road
 from ..ghg_calc.on_road import (
@@ -84,6 +98,173 @@ class EpaStationaryCalcRequest(BaseModel):
     gwp_version: str = "AR5"
 
 
+class EpaMobileCalcRequest(BaseModel):
+    """Authoritative mobile request. Client factors and totals are ignored."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    road_class: str
+    vehicle_type: str
+    fuel_type: str
+    fuel_quantity: Decimal
+    fuel_unit: str
+    distance: Optional[Decimal] = None
+    distance_unit: Optional[str] = None
+    model_year: Optional[int] = None
+    gwp_version: str = "AR5"
+
+
+class EpaRefrigerantLeakageCalcRequest(BaseModel):
+    """Authoritative refrigerant leakage request. Client GWP and totals are ignored."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    method: Literal["leakage_record", "estimated_leakage"]
+    gas: str = Field(min_length=1)
+    leakage_kg: Optional[Decimal] = None
+    charge_kg: Optional[Decimal] = None
+    leakage_rate_percent: Optional[Decimal] = None
+    equipment_type: Optional[str] = None
+
+    @model_validator(mode="after")
+    def fields_match_method(self) -> "EpaRefrigerantLeakageCalcRequest":
+        if self.method == "leakage_record":
+            if self.leakage_kg is None:
+                raise ValueError("leakage_kg is required for leakage_record")
+            if self.charge_kg is not None or self.leakage_rate_percent is not None:
+                raise ValueError(
+                    "charge_kg and leakage_rate_percent are only accepted for estimated_leakage"
+                )
+        else:
+            if self.charge_kg is None or self.leakage_rate_percent is None:
+                raise ValueError(
+                    "charge_kg and leakage_rate_percent are required for estimated_leakage"
+                )
+            if self.leakage_kg is not None:
+                raise ValueError("leakage_kg is only accepted for leakage_record")
+        return self
+
+
+class EpaRefrigerantLeakageSaveRequest(EpaRefrigerantLeakageCalcRequest):
+    """Save request. Client GWP, factor ids, and emission totals are ignored."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    assessment_id: uuid.UUID
+    period: str
+    equipment_id: Optional[str] = None
+    site: Optional[str] = None
+    counterparty_id: Optional[uuid.UUID] = None
+
+
+class EpaMobileSaveRequest(BaseModel):
+    """Save request. Client factor and emissions fields are ignored."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    road_class: str
+    vehicle_type: str
+    fuel_type: str
+    fuel_quantity: Decimal
+    fuel_unit: str
+    assessment_id: uuid.UUID
+    period: str
+    equipment_id: Optional[str] = None
+    distance: Optional[Decimal] = None
+    distance_unit: Optional[str] = None
+    model_year: Optional[int] = None
+    gwp_version: str = "AR5"
+    counterparty_id: Optional[uuid.UUID] = None
+    site: Optional[str] = None
+
+
+class Scope2ElectricityRequest(BaseModel):
+    """Location-based purchased electricity. grid_factor and emissions are ignored."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    country: str
+    quantity: Decimal
+    unit: str
+    period: str
+    grid_region: str = "national"
+    renewable_kwh: Optional[Decimal] = None
+    grid_factor: Optional[Decimal] = None
+    emissions_tco2e: Optional[Decimal] = None
+
+
+class Scope2ElectricitySaveRequest(Scope2ElectricityRequest):
+    assessment_id: uuid.UUID
+    counterparty_id: Optional[uuid.UUID] = None
+
+
+class Scope2HeatSteamRequest(BaseModel):
+    """EPA purchased heat or steam. Client factors and emission totals are ignored."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    energy_form: str
+    quantity: Decimal
+    unit: str
+    period: str
+    supplier_name: Optional[str] = None
+    co2_factor: Optional[Decimal] = None
+    ch4_factor: Optional[Decimal] = None
+    n2o_factor: Optional[Decimal] = None
+    emission_factor: Optional[Decimal] = None
+    emissions_tco2e: Optional[Decimal] = None
+
+
+class Scope2HeatSteamSaveRequest(Scope2HeatSteamRequest):
+    assessment_id: uuid.UUID
+    counterparty_id: Optional[uuid.UUID] = None
+
+
+class UkScope2ElectricityRequest(BaseModel):
+    """UK-calculator purchased electricity. Client factors and fuel masses are ignored."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    country: str
+    quantity: Decimal
+    unit: str
+    period: str
+    grid_region: str = "national"
+    renewable_kwh: Optional[Decimal] = None
+    grid_factor: Optional[Decimal] = None
+    emissions_tco2e: Optional[Decimal] = None
+    other_pct: Optional[Decimal] = None
+    other_row_emissions_sum: Optional[Decimal] = None
+
+
+class UkScope2ElectricitySaveRequest(UkScope2ElectricityRequest):
+    assessment_id: uuid.UUID
+    counterparty_id: Optional[uuid.UUID] = None
+
+
+class UkScope2HeatSteamRequest(BaseModel):
+    """UK-calculator purchased heat or steam. Client factors are ignored."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    country: str
+    energy_form: str
+    quantity: Decimal
+    unit: str
+    period: str
+    supplier_name: Optional[str] = None
+    co2_factor: Optional[Decimal] = None
+    ch4_factor: Optional[Decimal] = None
+    n2o_factor: Optional[Decimal] = None
+    emission_factor: Optional[Decimal] = None
+    emissions_tco2e: Optional[Decimal] = None
+
+
+class UkScope2HeatSteamSaveRequest(UkScope2HeatSteamRequest):
+    assessment_id: uuid.UUID
+    counterparty_id: Optional[uuid.UUID] = None
+
+
 class EpaStationarySaveRequest(BaseModel):
     """Save request. Client factor and emissions fields are ignored."""
 
@@ -99,7 +280,7 @@ class EpaStationarySaveRequest(BaseModel):
     counterparty_id: Optional[uuid.UUID] = None
     site: Optional[str] = None
     equipment_id: Optional[str] = None
-    period: Optional[str] = None
+    period: str
 
 
 class SimpleMultiplyRequest(BaseModel):
@@ -204,6 +385,8 @@ class WasteCalcRequest(BaseModel):
     disposal_method: str
     material: Optional[str] = None
     factor: Optional[float] = None
+    factor_unit: Optional[str] = None
+    mass_unit: Optional[str] = None
     assessment_id: Optional[uuid.UUID] = None
     persist: bool = False
 
@@ -454,6 +637,441 @@ def calc_epa_stationary(
             sheets=_stationary_factor_sheets(db),
         ),
         "EPA stationary combustion",
+    )
+
+
+@router.post("/epa/mobile")
+def calc_epa_mobile(
+    body: EpaMobileCalcRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    All-gas mobile combustion. Does not read a client factor and does not
+    write emission records.
+    """
+    del ctx
+    return _raise_if_failed(
+        calculate_mobile_combustion(
+            road_class=body.road_class,
+            vehicle_type=body.vehicle_type,
+            fuel_type=body.fuel_type,
+            fuel_quantity=body.fuel_quantity,
+            fuel_unit=body.fuel_unit,
+            distance=body.distance,
+            distance_unit=body.distance_unit,
+            model_year=body.model_year,
+            gwp_version=body.gwp_version,
+            sheets=load_mobile_factor_sheets(db),
+        ),
+        "EPA mobile combustion",
+    )
+
+
+@router.post("/epa/refrigerant-leakage")
+def calc_epa_refrigerant_leakage(
+    body: EpaRefrigerantLeakageCalcRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Refrigerant leakage. Does not read a client GWP and does not write
+    emission records. The legacy /epa/refrigerant route is unchanged.
+    """
+    del ctx
+    return _raise_if_failed(
+        calculate_refrigerant_leakage(
+            method=body.method,
+            gas=body.gas,
+            leakage_kg=body.leakage_kg,
+            charge_kg=body.charge_kg,
+            leakage_rate_percent=body.leakage_rate_percent,
+            equipment_type=body.equipment_type,
+            sheets=load_refrigerant_factor_sheets(db),
+        ),
+        "EPA refrigerant leakage",
+    )
+
+
+@router.post("/epa/refrigerant-leakage/records", status_code=status.HTTP_201_CREATED)
+def create_epa_refrigerant_leakage_record(
+    body: EpaRefrigerantLeakageSaveRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return save_epa_refrigerant_record(
+        db,
+        ctx,
+        sheets=load_refrigerant_factor_sheets(db),
+        method=body.method,
+        gas=body.gas,
+        leakage_kg=body.leakage_kg,
+        charge_kg=body.charge_kg,
+        leakage_rate_percent=body.leakage_rate_percent,
+        equipment_type=body.equipment_type,
+        equipment_id=body.equipment_id,
+        site=body.site,
+        period=body.period,
+        assessment_id=body.assessment_id,
+        counterparty_id=body.counterparty_id,
+    )
+
+
+@router.patch("/epa/refrigerant-leakage/records/{activity_id}")
+def update_epa_refrigerant_leakage_record(
+    activity_id: uuid.UUID,
+    body: EpaRefrigerantLeakageSaveRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return save_epa_refrigerant_record(
+        db,
+        ctx,
+        sheets=load_refrigerant_factor_sheets(db),
+        method=body.method,
+        gas=body.gas,
+        leakage_kg=body.leakage_kg,
+        charge_kg=body.charge_kg,
+        leakage_rate_percent=body.leakage_rate_percent,
+        equipment_type=body.equipment_type,
+        equipment_id=body.equipment_id,
+        site=body.site,
+        period=body.period,
+        assessment_id=body.assessment_id,
+        counterparty_id=body.counterparty_id,
+        activity_id=activity_id,
+    )
+
+
+@router.post("/epa/mobile/records", status_code=status.HTTP_201_CREATED)
+def create_epa_mobile_record(
+    body: EpaMobileSaveRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return save_epa_mobile_record(
+        db,
+        ctx,
+        sheets=load_mobile_factor_sheets(db),
+        road_class=body.road_class,
+        vehicle_type=body.vehicle_type,
+        fuel_type=body.fuel_type,
+        fuel_quantity=body.fuel_quantity,
+        fuel_unit=body.fuel_unit,
+        distance=body.distance,
+        distance_unit=body.distance_unit,
+        model_year=body.model_year,
+        gwp_version=body.gwp_version,
+        assessment_id=body.assessment_id,
+        counterparty_id=body.counterparty_id,
+        equipment_id=body.equipment_id,
+        site=body.site,
+        period=body.period,
+    )
+
+
+@router.patch("/epa/mobile/records/{activity_id}")
+def update_epa_mobile_record(
+    activity_id: uuid.UUID,
+    body: EpaMobileSaveRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return save_epa_mobile_record(
+        db,
+        ctx,
+        sheets=load_mobile_factor_sheets(db),
+        road_class=body.road_class,
+        vehicle_type=body.vehicle_type,
+        fuel_type=body.fuel_type,
+        fuel_quantity=body.fuel_quantity,
+        fuel_unit=body.fuel_unit,
+        distance=body.distance,
+        distance_unit=body.distance_unit,
+        model_year=body.model_year,
+        gwp_version=body.gwp_version,
+        assessment_id=body.assessment_id,
+        counterparty_id=body.counterparty_id,
+        equipment_id=body.equipment_id,
+        site=body.site,
+        period=body.period,
+        activity_id=activity_id,
+    )
+
+
+@router.post("/scope2/electricity")
+def calc_scope2_electricity(
+    body: Scope2ElectricityRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    _ = ctx
+    result = calculate_location_electricity(
+        db,
+        country=body.country,
+        quantity=body.quantity,
+        unit=body.unit,
+        period=body.period,
+        grid_region=body.grid_region,
+        renewable_kwh=body.renewable_kwh,
+        grid_factor=body.grid_factor,
+        emissions_tco2e=body.emissions_tco2e,
+    )
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=result.get("error") or "Purchased electricity could not be calculated.",
+        )
+    return result
+
+
+@router.post("/scope2/electricity/records", status_code=status.HTTP_201_CREATED)
+def create_scope2_electricity_record(
+    body: Scope2ElectricitySaveRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return save_scope2_electricity_record(
+        db,
+        ctx,
+        country=body.country,
+        quantity=body.quantity,
+        unit=body.unit,
+        period=body.period,
+        assessment_id=body.assessment_id,
+        grid_region=body.grid_region,
+        counterparty_id=body.counterparty_id,
+        renewable_kwh=body.renewable_kwh,
+        grid_factor=body.grid_factor,
+        emissions_tco2e=body.emissions_tco2e,
+    )
+
+
+@router.patch("/scope2/electricity/records/{activity_id}")
+def update_scope2_electricity_record(
+    activity_id: uuid.UUID,
+    body: Scope2ElectricitySaveRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return save_scope2_electricity_record(
+        db,
+        ctx,
+        country=body.country,
+        quantity=body.quantity,
+        unit=body.unit,
+        period=body.period,
+        assessment_id=body.assessment_id,
+        grid_region=body.grid_region,
+        counterparty_id=body.counterparty_id,
+        renewable_kwh=body.renewable_kwh,
+        activity_id=activity_id,
+        grid_factor=body.grid_factor,
+        emissions_tco2e=body.emissions_tco2e,
+    )
+
+
+def _uk_electricity_kwargs(body: UkScope2ElectricityRequest) -> Dict[str, Any]:
+    return {
+        "country": body.country,
+        "quantity": body.quantity,
+        "unit": body.unit,
+        "period": body.period,
+        "grid_region": body.grid_region,
+        "renewable_kwh": body.renewable_kwh,
+        "grid_factor": body.grid_factor,
+        "emissions_tco2e": body.emissions_tco2e,
+        "other_pct": body.other_pct,
+        "other_row_emissions_sum": body.other_row_emissions_sum,
+    }
+
+
+@router.post("/scope2/uk/electricity")
+def calc_uk_scope2_electricity(
+    body: UkScope2ElectricityRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    _ = ctx
+    result = calculate_uk_location_electricity(db, **_uk_electricity_kwargs(body))
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=result.get("error") or "Purchased electricity could not be calculated.",
+        )
+    return result
+
+
+@router.post("/scope2/uk/electricity/records", status_code=status.HTTP_201_CREATED)
+def create_uk_scope2_electricity_record(
+    body: UkScope2ElectricitySaveRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return save_uk_electricity_record(
+        db,
+        ctx,
+        assessment_id=body.assessment_id,
+        counterparty_id=body.counterparty_id,
+        **_uk_electricity_kwargs(body),
+    )
+
+
+@router.patch("/scope2/uk/electricity/records/{activity_id}")
+def update_uk_scope2_electricity_record(
+    activity_id: uuid.UUID,
+    body: UkScope2ElectricitySaveRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return save_uk_electricity_record(
+        db,
+        ctx,
+        activity_id=activity_id,
+        assessment_id=body.assessment_id,
+        counterparty_id=body.counterparty_id,
+        **_uk_electricity_kwargs(body),
+    )
+
+
+def _uk_heat_kwargs(body: UkScope2HeatSteamRequest) -> Dict[str, Any]:
+    return {
+        "country": body.country,
+        "energy_form": body.energy_form,
+        "quantity": body.quantity,
+        "unit": body.unit,
+        "period": body.period,
+        "supplier_name": body.supplier_name,
+        "co2_factor": body.co2_factor,
+        "ch4_factor": body.ch4_factor,
+        "n2o_factor": body.n2o_factor,
+        "emission_factor": body.emission_factor,
+        "emissions_tco2e": body.emissions_tco2e,
+    }
+
+
+@router.post("/scope2/uk/heat-steam")
+def calc_uk_scope2_heat_steam(
+    body: UkScope2HeatSteamRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    _ = ctx
+    result = calculate_uk_purchased_heat_steam(db, **_uk_heat_kwargs(body))
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=result.get("error") or "Purchased heat or steam could not be calculated.",
+        )
+    return result
+
+
+@router.post("/scope2/uk/heat-steam/records", status_code=status.HTTP_201_CREATED)
+def create_uk_scope2_heat_steam_record(
+    body: UkScope2HeatSteamSaveRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return save_uk_heat_steam_record(
+        db,
+        ctx,
+        assessment_id=body.assessment_id,
+        counterparty_id=body.counterparty_id,
+        **_uk_heat_kwargs(body),
+    )
+
+
+@router.patch("/scope2/uk/heat-steam/records/{activity_id}")
+def update_uk_scope2_heat_steam_record(
+    activity_id: uuid.UUID,
+    body: UkScope2HeatSteamSaveRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return save_uk_heat_steam_record(
+        db,
+        ctx,
+        activity_id=activity_id,
+        assessment_id=body.assessment_id,
+        counterparty_id=body.counterparty_id,
+        **_uk_heat_kwargs(body),
+    )
+
+
+@router.post("/scope2/heat-steam")
+def calc_scope2_heat_steam(
+    body: Scope2HeatSteamRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    _ = ctx, db
+    result = calculate_purchased_heat_steam(
+        energy_form=body.energy_form,
+        quantity=body.quantity,
+        unit=body.unit,
+        period=body.period,
+        supplier_name=body.supplier_name,
+        co2_factor=body.co2_factor,
+        ch4_factor=body.ch4_factor,
+        n2o_factor=body.n2o_factor,
+        emission_factor=body.emission_factor,
+        emissions_tco2e=body.emissions_tco2e,
+    )
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=result.get("error") or "Purchased heat or steam could not be calculated.",
+        )
+    return result
+
+
+@router.post("/scope2/heat-steam/records", status_code=status.HTTP_201_CREATED)
+def create_scope2_heat_steam_record(
+    body: Scope2HeatSteamSaveRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return save_scope2_heat_steam_record(
+        db,
+        ctx,
+        energy_form=body.energy_form,
+        quantity=body.quantity,
+        unit=body.unit,
+        period=body.period,
+        assessment_id=body.assessment_id,
+        counterparty_id=body.counterparty_id,
+        supplier_name=body.supplier_name,
+        co2_factor=body.co2_factor,
+        ch4_factor=body.ch4_factor,
+        n2o_factor=body.n2o_factor,
+        emission_factor=body.emission_factor,
+        emissions_tco2e=body.emissions_tco2e,
+    )
+
+
+@router.patch("/scope2/heat-steam/records/{activity_id}")
+def update_scope2_heat_steam_record(
+    activity_id: uuid.UUID,
+    body: Scope2HeatSteamSaveRequest,
+    ctx: OrgContext = Depends(require_org_context),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return save_scope2_heat_steam_record(
+        db,
+        ctx,
+        energy_form=body.energy_form,
+        quantity=body.quantity,
+        unit=body.unit,
+        period=body.period,
+        assessment_id=body.assessment_id,
+        counterparty_id=body.counterparty_id,
+        supplier_name=body.supplier_name,
+        activity_id=activity_id,
+        co2_factor=body.co2_factor,
+        ch4_factor=body.ch4_factor,
+        n2o_factor=body.n2o_factor,
+        emission_factor=body.emission_factor,
+        emissions_tco2e=body.emissions_tco2e,
     )
 
 
@@ -912,6 +1530,8 @@ def calc_waste(
             material=body.material,
             factor=body.factor,
             materials=materials,
+            factor_unit=body.factor_unit,
+            mass_unit=body.mass_unit,
         ),
         "Waste",
     )

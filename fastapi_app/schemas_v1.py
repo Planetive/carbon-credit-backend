@@ -285,13 +285,23 @@ class FinancedEmissionCreate(BaseModel):
     company_type: Optional[str] = None
     formula_id: Optional[str] = None
     formula_name: Optional[str] = None
-    inputs: Optional[Dict[str, Any]] = None
+    inputs: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "PCAF inputs JSON. Optional financing_instance_id (stable loan UUID) "
+            "is preserved as-is; formula_id is not a unique loan key. "
+            "exposure_id column is the portfolio exposures FK, not this id."
+        ),
+    )
     results: Optional[Dict[str, Any]] = None
     financed_emissions: Optional[Decimal] = None
     attribution_factor: Optional[Decimal] = None
     data_quality_score: Optional[Decimal] = None
     counterparty_id: Optional[uuid.UUID] = None
-    exposure_id: Optional[uuid.UUID] = None
+    exposure_id: Optional[uuid.UUID] = Field(
+        default=None,
+        description="FK to public.exposures.id only — not financing_instance_id.",
+    )
     questionnaire_id: Optional[uuid.UUID] = None
     status: str = Field(default="completed")
 
@@ -343,9 +353,17 @@ class FinancedCalculateRequest(BaseModel):
     calc_kind: str = Field(default="finance")
     formula_id: str
     company_type: str = Field(description="listed | unlisted / private")
-    inputs: Dict[str, Any]
+    inputs: Dict[str, Any] = Field(
+        description=(
+            "Include financing_instance_id for non-aggregate loans so persist "
+            "upserts that instance instead of inserting a duplicate."
+        )
+    )
     counterparty_id: Optional[uuid.UUID] = None
-    exposure_id: Optional[uuid.UUID] = None
+    exposure_id: Optional[uuid.UUID] = Field(
+        default=None,
+        description="FK to public.exposures.id only — not financing_instance_id.",
+    )
     persist: bool = True
 
 

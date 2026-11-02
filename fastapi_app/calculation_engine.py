@@ -14,10 +14,14 @@ from .finance_models import (
     CompanyType, FormulaCategory, CalculationStep
 )
 from .shared_formula_utils import (
+    _as_float,
     calculate_attribution_factor_listed, calculate_attribution_factor_unlisted,
     validate_financial_inputs, get_denominator_for_company_type,
-    create_emission_calculation_steps, create_activity_calculation_steps
+    create_emission_calculation_steps, create_activity_calculation_steps,
+    normalize_finance_input_aliases, require_positive_denominator,
+    sector_intensity_tco2e,
 )
+from .financed_scope_breakdown import attach_scope_breakdown, option_1_company_emissions
 from .unit_conversions import smart_convert_unit
 from .formula_configs import BASIC_FORMULAS
 from .corporate_bond_business_loan_configs import CORPORATE_BOND_BUSINESS_LOAN_FORMULAS
@@ -86,14 +90,22 @@ class CalculationEngine:
         Migrated from: validateInputs
         """
         formula = self.get_formula_by_id(formula_id)
+        inputs = dict(inputs)
 
         if formula and formula.category == FormulaCategory.SOVEREIGN_DEBT:
-            inputs = normalize_sovereign_field_aliases(dict(inputs))
+            inputs = normalize_sovereign_field_aliases(inputs)
         if formula and formula.category in (
             FormulaCategory.COMMERCIAL_REAL_ESTATE,
             FormulaCategory.MORTGAGE,
         ):
-            inputs = normalize_property_field_aliases(dict(inputs))
+            inputs = normalize_property_field_aliases(inputs)
+        if formula and formula.category in (
+            FormulaCategory.LISTED_EQUITY,
+            FormulaCategory.BUSINESS_LOANS,
+            FormulaCategory.PROJECT_FINANCE,
+            FormulaCategory.FACILITATED_EMISSION,
+        ):
+            inputs = normalize_finance_input_aliases(inputs)
 
         # DEBUG: Log validation details
         logger.info(f'🔍 CALCULATION ENGINE DEBUG - Formula ID: {formula_id}')
@@ -235,6 +247,22 @@ class CalculationEngine:
         
         if not formula:
             raise ValueError(f"Formula '{formula_id}' not found")
+
+        inputs = dict(inputs)
+        if formula.category == FormulaCategory.SOVEREIGN_DEBT:
+            inputs = normalize_sovereign_field_aliases(inputs)
+        elif formula.category in (
+            FormulaCategory.COMMERCIAL_REAL_ESTATE,
+            FormulaCategory.MORTGAGE,
+        ):
+            inputs = normalize_property_field_aliases(inputs)
+        elif formula.category in (
+            FormulaCategory.LISTED_EQUITY,
+            FormulaCategory.BUSINESS_LOANS,
+            FormulaCategory.PROJECT_FINANCE,
+            FormulaCategory.FACILITATED_EMISSION,
+        ):
+            inputs = normalize_finance_input_aliases(inputs)
         
         # Validate inputs first
         validation = self.validate_inputs(formula_id, inputs)
@@ -243,6 +271,7 @@ class CalculationEngine:
         
         # Execute calculation based on formula type
         result = self._execute_calculation(formula, inputs, company_type)
+        result = attach_scope_breakdown(formula, inputs, result)
         
         # Add validation warnings to result metadata
         if validation.warnings:
@@ -537,28 +566,17 @@ class CalculationEngine:
                 metadata=meta,
             )
 
-        # Get the denominator based on company type
-        denominator = get_denominator_for_company_type(inputs, company_type.value)
-        outstanding_amount = inputs.get('outstanding_amount', 0)
+        inputs = normalize_finance_input_aliases(dict(inputs))
+        is_facilitated = formula.category == FormulaCategory.FACILITATED_EMISSION
+        outstanding_amount = _as_float(
+            inputs.get("facilitated_amount" if is_facilitated else "outstanding_amount")
+        )
+        denominator, attribution_factor = self._finance_attribution(
+            formula, inputs, outstanding_amount
+        )
 
-        # Calculate attribution factor based on formula type
-        if formula.category.value == 'facilitated_emission':
-            # For facilitated emissions, use facilitated_amount
-            facilitated_amount = inputs.get('facilitated_amount', 0)
-            if company_type == CompanyType.LISTED:
-                attribution_factor = calculate_attribution_factor_listed(facilitated_amount, denominator)
-            else:
-                attribution_factor = calculate_attribution_factor_unlisted(facilitated_amount, denominator)
-        else:
-            # For finance emissions, use outstanding_amount
-            if company_type == CompanyType.LISTED:
-                attribution_factor = calculate_attribution_factor_listed(outstanding_amount, denominator)
-            else:
-                attribution_factor = calculate_attribution_factor_unlisted(outstanding_amount, denominator)
-
-        # Calculate financed emissions based on formula type
         financed_emissions, emission_factor, calculation_steps = self._calculate_emissions(
-            formula, inputs, outstanding_amount, denominator, company_type
+            formula, inputs, outstanding_amount, denominator, attribution_factor, company_type
         )
 
         return CalculationResult(
@@ -575,82 +593,173 @@ class CalculationEngine:
                 'option_code': formula.option_code
             }
         )
+
+    def _finance_attribution(
+        self,
+        formula: FormulaConfig,
+        inputs: Dict[str, Any],
+        amount: float,
+    ) -> Tuple[Optional[float], float]:
+        """Return (denominator, attribution_factor). Option 3c does not use a denominator."""
+        if formula.option_code == "3c":
+            return None, 1.0
+
+        input_names = {field.name for field in formula.inputs}
+        if (
+            formula.category == FormulaCategory.PROJECT_FINANCE
+            or "total_project_equity_plus_debt" in input_names
+        ):
+            denominator = require_positive_denominator(
+                inputs.get("total_project_equity_plus_debt"),
+                "Total project equity + debt",
+            )
+        elif "evic" in input_names:
+            denominator = require_positive_denominator(inputs.get("evic"), "EVIC")
+        elif "total_equity_plus_debt" in input_names:
+            denominator = require_positive_denominator(
+                inputs.get("total_equity_plus_debt"),
+                "Total equity + debt",
+            )
+        else:
+            raise ValueError(
+                f"No attribution denominator defined for formula '{formula.id}'"
+            )
+        return denominator, amount / denominator
     
     def _calculate_emissions(
         self,
         formula: FormulaConfig,
         inputs: Dict[str, Any],
         outstanding_amount: float,
-        denominator: float,
+        denominator: Optional[float],
+        attribution_factor: float,
         company_type: CompanyType
     ) -> Tuple[float, float, List[CalculationStep]]:
         """
-        Calculate emissions based on formula type
+        Calculate emissions based on PCAF option code.
+
+        Unsupported options raise ValueError instead of returning zero.
         """
-        # Check if this is a facilitated emission
-        if formula.category.value == 'facilitated_emission':
-            # Facilitated emission calculation
-            facilitated_amount = inputs.get('facilitated_amount', 0)
-            weighting_factor = inputs.get('weighting_factor', 0)
-            emission_data = inputs.get('verified_emissions', 0) or inputs.get('unverified_emissions', 0)
-            
-            # For facilitated emissions: (Facilitated Amount / Company Value) × Weighting Factor × Emission Data
-            attribution_factor = facilitated_amount / denominator if denominator > 0 else 0
-            financed_emissions = attribution_factor * weighting_factor * emission_data
-            emission_factor = 0  # Not applicable for direct emissions
-            
-            calculation_steps = [
-                CalculationStep(
-                    step='Attribution Factor',
-                    value=attribution_factor,
-                    formula=f"{facilitated_amount} / {denominator} = {attribution_factor:.6f}"
-                ),
-                CalculationStep(
-                    step='Weighting Factor',
-                    value=weighting_factor,
-                    formula=f"Fixed weighting factor: {weighting_factor}"
-                ),
-                CalculationStep(
-                    step='Facilitated Emissions',
-                    value=financed_emissions,
-                    formula=f"({facilitated_amount} / {denominator:.2f}) × {weighting_factor} × {emission_data} = {financed_emissions:.2f}"
+        is_facilitated = formula.category == FormulaCategory.FACILITATED_EMISSION
+        weighting_factor = _as_float(inputs.get("weighting_factor", 1.0 if not is_facilitated else 0.0))
+        if not is_facilitated:
+            weighting_factor = 1.0
+        option = formula.option_code
+        if is_facilitated and option in ("3a", "3c") and weighting_factor <= 0:
+            raise ValueError("Weighting factor must be greater than 0")
+        result_label = "Facilitated Emissions" if is_facilitated else "Financed Emissions"
+
+        if option == "3c":
+            atr = _as_float(inputs.get("asset_turnover_ratio"))
+            intensity = sector_intensity_tco2e(inputs)
+            if outstanding_amount <= 0 or atr <= 0 or intensity <= 0:
+                raise ValueError(
+                    "Outstanding/facilitated amount, asset turnover ratio, and sector intensity "
+                    "must be greater than 0"
                 )
+            if is_facilitated and weighting_factor <= 0:
+                raise ValueError("Weighting factor must be greater than 0")
+            financed_emissions = outstanding_amount * weighting_factor * atr * intensity
+            steps = [
+                CalculationStep(
+                    step="Sector intensity",
+                    value=intensity,
+                    formula=f"{intensity} tCO2e per currency unit",
+                ),
+                CalculationStep(
+                    step=result_label,
+                    value=financed_emissions,
+                    formula=(
+                        f"{outstanding_amount} × {atr} × {intensity}"
+                        + (f" × {weighting_factor}" if is_facilitated else "")
+                        + f" = {financed_emissions:.4f}"
+                    ),
+                ),
             ]
-            
-        elif formula.option_code in ['1a', '1b']:
-            # Direct emission data (finance emissions)
-            emission_data = inputs.get('verified_emissions', 0) or inputs.get('unverified_emissions', 0)
-            emission_factor = 0  # Not applicable for direct emissions
-            financed_emissions = (outstanding_amount / denominator) * emission_data
-            
-            calculation_steps = create_emission_calculation_steps(
-                outstanding_amount, denominator, emission_data,
-                'Emission Data', company_type.value
+            return financed_emissions, intensity, steps
+
+        if denominator is None:
+            raise ValueError(f"Denominator required for option {option}")
+
+        company_emissions, emission_factor, emission_label = self._company_emissions(
+            formula, inputs
+        )
+        financed_emissions = attribution_factor * weighting_factor * company_emissions
+        steps: List[CalculationStep] = [
+            CalculationStep(
+                step="Attribution Factor",
+                value=attribution_factor,
+                formula=f"{outstanding_amount} / {denominator} = {attribution_factor:.6f}",
+            ),
+            CalculationStep(
+                step=emission_label,
+                value=company_emissions,
+                formula=emission_label,
+            ),
+        ]
+        if is_facilitated:
+            steps.append(
+                CalculationStep(
+                    step="Weighting Factor",
+                    value=weighting_factor,
+                    formula=f"Weighting factor: {weighting_factor}",
+                )
             )
-            
-        elif formula.option_code in ['2a', '2b']:
-            # Activity-based calculation
-            activity_data = inputs.get('energy_consumption', 0) or inputs.get('production', 0)
-            emission_factor = inputs.get('emission_factor', 0) or inputs.get('production_emission_factor', 0)
-            calculated_emissions = activity_data * emission_factor
-            financed_emissions = (outstanding_amount / denominator) * calculated_emissions
-            
-            activity_label = 'Energy Consumption' if formula.option_code == '2a' else 'Production'
-            emission_factor_label = 'Emission Factor' if formula.option_code == '2a' else 'Production Emission Factor'
-            
-            calculation_steps = create_activity_calculation_steps(
-                outstanding_amount, denominator, activity_data, activity_label,
-                emission_factor, emission_factor_label, company_type.value
+        steps.append(
+            CalculationStep(
+                step=result_label,
+                value=financed_emissions,
+                formula=(
+                    f"{attribution_factor:.6f} × {company_emissions:.4f}"
+                    + (f" × {weighting_factor}" if is_facilitated else "")
+                    + f" = {financed_emissions:.4f}"
+                ),
             )
-            
-        else:
-            # Default case
-            emission_data = 0
-            emission_factor = 0
-            financed_emissions = 0
-            calculation_steps = []
-        
-        return financed_emissions, emission_factor, calculation_steps
+        )
+        return financed_emissions, emission_factor, steps
+
+    def _company_emissions(
+        self, formula: FormulaConfig, inputs: Dict[str, Any]
+    ) -> Tuple[float, float, str]:
+        """Return (company_or_project_emissions_tCO2e, emission_factor, label)."""
+        option = formula.option_code
+        if option == "1a":
+            emissions = option_1_company_emissions(inputs, verified=True)
+            if emissions is None:
+                raise ValueError("Verified emissions or reported Scope 1/2/3 values are required")
+            return emissions, 0.0, "Verified emissions"
+        if option == "1b":
+            emissions = option_1_company_emissions(inputs, verified=False)
+            if emissions is None:
+                raise ValueError("Unverified emissions or reported Scope 1/2/3 values are required")
+            return emissions, 0.0, "Unverified emissions"
+        if option == "2a":
+            energy = _as_float(inputs.get("energy_consumption"))
+            emission_factor = _as_float(inputs.get("emission_factor"))
+            if energy <= 0 or emission_factor <= 0:
+                raise ValueError("Energy consumption and emission factor must be greater than 0")
+            process = _as_float(inputs.get("process_emissions"))
+            company = energy * emission_factor + process
+            return company, company, "Energy emissions"
+        if option == "2b":
+            production = _as_float(inputs.get("production"))
+            emission_factor = _as_float(
+                inputs.get("production_emission_factor")
+            ) or _as_float(inputs.get("emission_factor"))
+            if production <= 0 or emission_factor <= 0:
+                raise ValueError("Production and emission factor must be greater than 0")
+            company = production * emission_factor
+            return company, company, "Production emissions"
+        if option == "3a":
+            revenue = _as_float(inputs.get("company_revenue"))
+            intensity = sector_intensity_tco2e(inputs)
+            if revenue <= 0 or intensity <= 0:
+                raise ValueError("Company/project revenue and sector intensity must be greater than 0")
+            company = revenue * intensity
+            return company, intensity, "Estimated emissions"
+        raise ValueError(
+            f"Unsupported PCAF option '{option}' for formula '{formula.id}'"
+        )
     
     def _has_required_inputs(self, formula: FormulaConfig, available_inputs: List[str]) -> bool:
         """

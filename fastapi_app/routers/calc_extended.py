@@ -135,6 +135,7 @@ class FreightRequest(BaseModel):
     distance: float
     weight: float
     co2_factor: float
+    factor_unit: Optional[str] = None
     assessment_id: Optional[uuid.UUID] = None
     persist: bool = False
 
@@ -152,6 +153,8 @@ class CommutingRequest(BaseModel):
     distance: float
     co2_factor: float
     unit: Optional[str] = None
+    distance_basis: Optional[str] = None
+    working_days_per_year: Optional[float] = None
     assessment_id: Optional[uuid.UUID] = None
     persist: bool = False
 
@@ -159,6 +162,9 @@ class CommutingRequest(BaseModel):
 class SpendBasedRequest(BaseModel):
     amount: float
     emission_factor: float
+    factor_unit: Optional[str] = None
+    activity_currency: Optional[str] = None
+    activity_price_year: Optional[int] = None
     category: str = "purchased_goods"
     assessment_id: Optional[uuid.UUID] = None
     persist: bool = False
@@ -349,7 +355,10 @@ def calc_freight(
 ) -> Dict[str, Any]:
     result = _ok(
         calculate_freight(
-            distance=body.distance, weight=body.weight, co2_factor=body.co2_factor
+            distance=body.distance,
+            weight=body.weight,
+            co2_factor=body.co2_factor,
+            factor_unit=body.factor_unit,
         ),
         "Freight",
     )
@@ -414,6 +423,8 @@ def calc_employee_commuting(
             distance=body.distance,
             co2_factor=body.co2_factor,
             unit=body.unit,
+            distance_basis=body.distance_basis,
+            working_days_per_year=body.working_days_per_year,
         ),
         "Employee commuting",
     )
@@ -445,7 +456,13 @@ def calc_spend_based(
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     result = _ok(
-        calculate_spend_based(amount=body.amount, emission_factor=body.emission_factor),
+        calculate_spend_based(
+            amount=body.amount,
+            emission_factor=body.emission_factor,
+            factor_unit=body.factor_unit,
+            activity_currency=body.activity_currency,
+            activity_price_year=body.activity_price_year,
+        ),
         "Spend-based",
     )
     if body.persist and body.assessment_id:

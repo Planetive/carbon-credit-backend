@@ -167,7 +167,9 @@
       "volume": 100,
       "disposal_method": "Landfilled",
       "factor": 0.05,
-      "expected_emissions_kg": 5.0
+      "factor_unit": "MTCO2e/short ton",
+      "mass_unit": "kg",
+      "expected_emissions_kg": 5.511556554621939
     },
     {
       "id": "waste_map_lookup",
@@ -182,7 +184,9 @@
       "volume": 10,
       "material": "Mixed Paper",
       "disposal_method": "Landfilled",
-      "expected_emissions_kg": 4.6
+      "factor_unit": "MTCO2e/short ton",
+      "mass_unit": "kg",
+      "expected_emissions_kg": 5.070632030252185
     }
   ],
   "uk_passenger": [

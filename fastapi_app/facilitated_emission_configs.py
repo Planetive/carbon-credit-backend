@@ -161,16 +161,17 @@ def _calculate_2a_facilitated_energy_listed(inputs: dict, company_type: str) -> 
     weighting_factor = inputs.get('weighting_factor', 0)
     energy_consumption = inputs.get('energy_consumption', 0)
     emission_factor = inputs.get('emission_factor', 0)
+    process_emissions = inputs.get('process_emissions', 0) or 0
     evic = calculate_evic(inputs)
     attribution_factor = calculate_attribution_factor_listed(facilitated_amount, evic)
-    energy_emissions = energy_consumption * emission_factor
+    energy_emissions = energy_consumption * emission_factor + process_emissions
     facilitated_emissions = (facilitated_amount / evic) * weighting_factor * energy_emissions
     
     return {
         'attributionFactor': attribution_factor,
         'emissionFactor': energy_emissions,
         'financedEmissions': facilitated_emissions,
-        'dataQualityScore': 3,
+        'dataQualityScore': 2,
         'methodology': 'Option 2a - Energy Consumption Data (Facilitated - Listed)',
         'calculationSteps': [
             {
@@ -202,16 +203,17 @@ def _calculate_2a_facilitated_energy_unlisted(inputs: dict, company_type: str) -
     weighting_factor = inputs.get('weighting_factor', 0)
     energy_consumption = inputs.get('energy_consumption', 0)
     emission_factor = inputs.get('emission_factor', 0)
+    process_emissions = inputs.get('process_emissions', 0) or 0
     total_equity_plus_debt = calculate_total_equity_plus_debt(inputs)
     attribution_factor = calculate_attribution_factor_unlisted(facilitated_amount, total_equity_plus_debt)
-    energy_emissions = energy_consumption * emission_factor
+    energy_emissions = energy_consumption * emission_factor + process_emissions
     facilitated_emissions = (facilitated_amount / total_equity_plus_debt) * weighting_factor * energy_emissions
     
     return {
         'attributionFactor': attribution_factor,
         'emissionFactor': energy_emissions,
         'financedEmissions': facilitated_emissions,
-        'dataQualityScore': 3,
+        'dataQualityScore': 2,
         'methodology': 'Option 2a - Energy Consumption Data (Facilitated - Unlisted)',
         'calculationSteps': [
             {
@@ -242,7 +244,7 @@ def _calculate_2b_facilitated_production_listed(inputs: dict, company_type: str)
     facilitated_amount = inputs.get('facilitated_amount', 0)
     weighting_factor = inputs.get('weighting_factor', 0)
     production = inputs.get('production', 0)
-    production_emission_factor = inputs.get('production_emission_factor', 0)
+    production_emission_factor = inputs.get('production_emission_factor', 0) or inputs.get('emission_factor', 0)
     evic = calculate_evic(inputs)
     attribution_factor = calculate_attribution_factor_listed(facilitated_amount, evic)
     production_emissions = production * production_emission_factor
@@ -283,7 +285,7 @@ def _calculate_2b_facilitated_production_unlisted(inputs: dict, company_type: st
     facilitated_amount = inputs.get('facilitated_amount', 0)
     weighting_factor = inputs.get('weighting_factor', 0)
     production = inputs.get('production', 0)
-    production_emission_factor = inputs.get('production_emission_factor', 0)
+    production_emission_factor = inputs.get('production_emission_factor', 0) or inputs.get('emission_factor', 0)
     total_equity_plus_debt = calculate_total_equity_plus_debt(inputs)
     attribution_factor = calculate_attribution_factor_unlisted(facilitated_amount, total_equity_plus_debt)
     production_emissions = production * production_emission_factor
@@ -514,7 +516,7 @@ def create_facilitated_emission_formulas():
             description='Energy consumption data with energy-specific emission factors for facilitated emissions from listed companies',
             category=FormulaCategory.FACILITATED_EMISSION,
             option_code='2a',
-            data_quality_score=3,
+            data_quality_score=2,
             inputs=[
                 facilitated_amount_input,
                 FormulaInput(
@@ -549,6 +551,14 @@ def create_facilitated_emission_formulas():
                     required=True,
                     unit='tCO2e/MWh',
                     description='How much carbon is released per unit of energy used'
+                ),
+                FormulaInput(
+                    name='process_emissions',
+                    label='Process Emissions',
+                    type=FormulaInputType.NUMBER,
+                    required=False,
+                    unit='tCO2e',
+                    description='Optional process emissions added to energy-related emissions before attribution'
                 )
             ],
             applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2],
@@ -562,7 +572,7 @@ def create_facilitated_emission_formulas():
             description='Energy consumption data with energy-specific emission factors for facilitated emissions from unlisted companies',
             category=FormulaCategory.FACILITATED_EMISSION,
             option_code='2a',
-            data_quality_score=3,
+            data_quality_score=2,
             inputs=[
                 facilitated_amount_input,
                 FormulaInput(
@@ -597,6 +607,14 @@ def create_facilitated_emission_formulas():
                     required=True,
                     unit='tCO2e/MWh',
                     description='How much carbon is released per unit of energy used'
+                ),
+                FormulaInput(
+                    name='process_emissions',
+                    label='Process Emissions',
+                    type=FormulaInputType.NUMBER,
+                    required=False,
+                    unit='tCO2e',
+                    description='Optional process emissions added to energy-related emissions before attribution'
                 )
             ],
             applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2],
@@ -697,6 +715,160 @@ def create_facilitated_emission_formulas():
             ],
             applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2, ScopeType.SCOPE3],
             calculate=_calculate_2b_facilitated_production_unlisted
+        ),
+
+        # OPTION 3A - REVENUE-BASED (FACILITATED - LISTED)
+        FormulaConfig(
+            id='3a-facilitated-revenue-listed',
+            name='Option 3a - Revenue-based (Facilitated - Listed)',
+            description='Company revenue × sector intensity with EVIC attribution and weighting factor',
+            category=FormulaCategory.FACILITATED_EMISSION,
+            option_code='3a',
+            data_quality_score=4,
+            inputs=[
+                facilitated_amount_input,
+                FormulaInput(
+                    name='evic',
+                    label='EVIC (Enterprise Value Including Cash)',
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit='PKR',
+                ),
+                weighting_factor_input,
+                FormulaInput(
+                    name='company_revenue',
+                    label='Company Revenue',
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit='PKR',
+                ),
+                FormulaInput(
+                    name='sector_intensity',
+                    label='Sector intensity',
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit='kgCO2e/PKR',
+                ),
+                FormulaInput(
+                    name='sector_intensity_unit',
+                    label='Sector intensity unit',
+                    type=FormulaInputType.TEXT,
+                    required=False,
+                ),
+            ],
+            applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2, ScopeType.SCOPE3],
+        ),
+
+        # OPTION 3A - REVENUE-BASED (FACILITATED - UNLISTED)
+        FormulaConfig(
+            id='3a-facilitated-revenue-unlisted',
+            name='Option 3a - Revenue-based (Facilitated - Unlisted)',
+            description='Company revenue × sector intensity with equity+debt attribution and weighting factor',
+            category=FormulaCategory.FACILITATED_EMISSION,
+            option_code='3a',
+            data_quality_score=4,
+            inputs=[
+                facilitated_amount_input,
+                FormulaInput(
+                    name='total_equity_plus_debt',
+                    label='Total Equity + Debt',
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit='PKR',
+                ),
+                weighting_factor_input,
+                FormulaInput(
+                    name='company_revenue',
+                    label='Company Revenue',
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit='PKR',
+                ),
+                FormulaInput(
+                    name='sector_intensity',
+                    label='Sector intensity',
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit='kgCO2e/PKR',
+                ),
+                FormulaInput(
+                    name='sector_intensity_unit',
+                    label='Sector intensity unit',
+                    type=FormulaInputType.TEXT,
+                    required=False,
+                ),
+            ],
+            applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2, ScopeType.SCOPE3],
+        ),
+
+        # OPTION 3C - ATR (FACILITATED - LISTED)
+        FormulaConfig(
+            id='3c-facilitated-atr-listed',
+            name='Option 3c - Asset Turnover Ratio (Facilitated - Listed)',
+            description='Facilitated amount × weighting factor × ATR × sector intensity',
+            category=FormulaCategory.FACILITATED_EMISSION,
+            option_code='3c',
+            data_quality_score=5,
+            inputs=[
+                facilitated_amount_input,
+                weighting_factor_input,
+                FormulaInput(
+                    name='asset_turnover_ratio',
+                    label='Asset Turnover Ratio',
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit='ratio',
+                ),
+                FormulaInput(
+                    name='sector_intensity',
+                    label='Sector intensity',
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit='kgCO2e/PKR',
+                ),
+                FormulaInput(
+                    name='sector_intensity_unit',
+                    label='Sector intensity unit',
+                    type=FormulaInputType.TEXT,
+                    required=False,
+                ),
+            ],
+            applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2, ScopeType.SCOPE3],
+        ),
+
+        # OPTION 3C - ATR (FACILITATED - UNLISTED)
+        FormulaConfig(
+            id='3c-facilitated-atr-unlisted',
+            name='Option 3c - Asset Turnover Ratio (Facilitated - Unlisted)',
+            description='Facilitated amount × weighting factor × ATR × sector intensity',
+            category=FormulaCategory.FACILITATED_EMISSION,
+            option_code='3c',
+            data_quality_score=5,
+            inputs=[
+                facilitated_amount_input,
+                weighting_factor_input,
+                FormulaInput(
+                    name='asset_turnover_ratio',
+                    label='Asset Turnover Ratio',
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit='ratio',
+                ),
+                FormulaInput(
+                    name='sector_intensity',
+                    label='Sector intensity',
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit='kgCO2e/PKR',
+                ),
+                FormulaInput(
+                    name='sector_intensity_unit',
+                    label='Sector intensity unit',
+                    type=FormulaInputType.TEXT,
+                    required=False,
+                ),
+            ],
+            applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2, ScopeType.SCOPE3],
         )
     ]
 

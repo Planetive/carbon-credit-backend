@@ -104,7 +104,12 @@ def _calc(**overrides):
 def test_natural_gas_100_mmbtu():
     result = _calc(fuel="Natural Gas", quantity=100, unit="mmBtu")
     assert result["success"] is True
-    assert result["gases"]["co2"] == {"mass_kg": "5306", "gwp": "1", "co2e_kg": "5306"}
+    assert result["gases"]["co2"] == {
+        "mass_kg": "5306",
+        "gwp": "1",
+        "co2e_kg": "5306",
+        "reporting": "scope1",
+    }
     assert result["gases"]["ch4"] == {"mass_kg": "0.1", "gwp": "28", "co2e_kg": "2.8"}
     assert result["gases"]["n2o"] == {"mass_kg": "0.01", "gwp": "265", "co2e_kg": "2.65"}
     assert result["total_kg_co2e"] == "5311.45"
@@ -181,9 +186,134 @@ def test_invalid_unit_quantity_fuel_and_gwp_are_rejected():
     ] is False
 
 
+WOOD = {
+    "Category": "Biomass Fuels",
+    "Fuel Type": "Wood and Wood Residuals",
+    "CO2 Factor": 93.80,
+    "CO2 Unit": "kg CO2 per mmBtu",
+    "CH4 Factor": 7.2,
+    "CH4 Unit": "g CH4 per mmBtu",
+    "N2O Factor": 3.6,
+    "N2O Unit": "g N2O per mmBtu",
+    "CO2 Factor_1": 1640,
+    "CO2 Unit_1": "kg CO2 per short ton",
+    "CH4 Factor_1": 126,
+    "CH4 Unit_1": "g CH4 per short ton",
+    "N2O Factor_1": 63,
+    "N2O Unit_1": "g N2O per short ton",
+}
+
+PEAT = {
+    "Category": "Biomass Fuels",
+    "Fuel Type": "Peat",
+    "CO2 Factor": 111.84,
+    "CO2 Unit": "kg CO2 per mmBtu",
+    "CH4 Factor": 32,
+    "CH4 Unit": "g CH4 per mmBtu",
+    "N2O Factor": 4.2,
+    "N2O Unit": "g N2O per mmBtu",
+}
+
+MIXED_INDUSTRIAL = {
+    "Category": "Coal and Coke",
+    "Fuel Type": "Mixed (Industrial Sector)",
+    "CO2 Factor": 94.67,
+    "CO2 Unit": "kg CO2 per mmBtu",
+    "CH4 Factor": 11,
+    "CH4 Unit": "g CH4 per mmBtu",
+    "N2O Factor": 1.6,
+    "N2O Unit": "g N2O per mmBtu",
+}
+
+MSW = {
+    "Category": "Biomass Fuels",
+    "Fuel Type": "Municipal Solid Waste",
+    "CO2 Factor": 90.7,
+    "CO2 Unit": "kg CO2 per mmBtu",
+    "CH4 Factor": 32,
+    "CH4 Unit": "g CH4 per mmBtu",
+    "N2O Factor": 4.2,
+    "N2O Unit": "g N2O per mmBtu",
+}
+
+
+def _with_rows(*rows):
+    sheets = [dict(sheet) for sheet in SHEETS]
+    sheets.append(
+        {
+            "publisher": "EPA",
+            "dataset_code": "fuel_epa_1",
+            "dataset_title": "Fuel EPA 1",
+            "version_label": "imported_from_sheet",
+            "rows": list(rows),
+        }
+    )
+    return sheets
+
+
 def test_natural_gas_mmscf_uses_unrounded_hhv_product():
     result = _calc(fuel="Natural Gas", quantity=1, unit="MMSCF")
     assert result["success"] is True
     assert result["factors"]["co2"]["value"] == "54439.56"
     assert result["factors"]["ch4"]["value"] == "1026"
     assert result["factors"]["n2o"]["value"] == "102.6"
+
+
+def test_natural_gas_keeps_co2_in_scope_1_and_records_zero_biogenic():
+    result = _calc(fuel="Natural Gas", quantity=100, unit="mmBtu")
+    assert result["total_t_co2e"] == "5.31145"
+    assert result["biogenic_co2_t"] == "0"
+    assert result["accounting"]["treatment"] == "fossil_scope1"
+    assert result["accounting"]["version"] == "epa_stationary_biogenic_v1"
+    assert result["gases"]["co2"]["reporting"] == "scope1"
+    assert result["factor_source"]["gwp_version"] == "AR5"
+
+
+def test_wood_reports_biogenic_co2_outside_scope_1():
+    result = _calc(fuel="Wood and Wood Residuals", quantity=1, unit="short ton", sheets=_with_rows(WOOD))
+    assert result["success"] is True
+    assert result["gases"]["co2"]["mass_kg"] == "1640"
+    assert result["gases"]["co2"]["reporting"] == "biogenic_outside_scope1"
+    assert result["gases"]["ch4"]["co2e_kg"] == "3.528"
+    assert result["gases"]["n2o"]["co2e_kg"] == "16.695"
+    assert result["total_kg_co2e"] == "20.223"
+    assert result["total_t_co2e"] == "0.020223"
+    assert result["biogenic_co2_t"] == "1.64"
+    assert result["accounting"]["treatment"] == "biogenic_co2_outside_scope1"
+    assert result["total_t_co2e"] != "1.660223"
+
+
+def test_peat_co2_stays_in_scope_1():
+    result = _calc(fuel="Peat", quantity=1, unit="mmBtu", sheets=_with_rows(PEAT))
+    assert result["success"] is True
+    assert result["category"] == "Biomass Fuels"
+    assert result["accounting"]["treatment"] == "peat_fossil_scope1"
+    assert result["gases"]["co2"]["mass_kg"] == "111.84"
+    assert result["gases"]["co2"]["reporting"] == "scope1"
+    assert result["biogenic_co2_t"] == "0"
+    assert result["total_kg_co2e"] == "113.849"
+    assert result["total_t_co2e"] == "0.113849"
+
+
+def test_mixed_industrial_coal_is_fossil_not_a_biogenic_split():
+    result = _calc(
+        fuel="Mixed (Industrial Sector)",
+        quantity=1,
+        unit="mmBtu",
+        sheets=_with_rows(MIXED_INDUSTRIAL),
+    )
+    assert result["success"] is True
+    assert result["accounting"]["treatment"] == "fossil_scope1"
+    assert result["biogenic_co2_t"] == "0"
+    assert result["gases"]["co2"]["co2e_kg"] == "94.67"
+    assert result["total_kg_co2e"] == "95.402"
+
+
+def test_municipal_solid_waste_is_flagged_instead_of_split():
+    result = _calc(fuel="Municipal Solid Waste", quantity=1, unit="mmBtu", sheets=_with_rows(MSW))
+    assert result["success"] is False
+    assert result["review_required"] is True
+    assert result["total_t_co2e"] is None
+    assert result["biogenic_co2_t"] is None
+    assert result["gases"]["co2"]["mass_kg"] == "90.7"
+    assert result["accounting"]["treatment"] == "needs_review"

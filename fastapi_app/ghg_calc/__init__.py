@@ -9,6 +9,8 @@ from .epa_fuel import (
 from .stationary_combustion import calculate_stationary_combustion
 from .epa_refrigerant import calculate_epa_refrigerant
 from .heat_steam import build_heat_steam_rows, calculate_heat_steam
+from .mobile_combustion import calculate_mobile_combustion, load_mobile_factor_sheets
+from .refrigerant_leakage import calculate_refrigerant_leakage, load_refrigerant_factor_sheets
 from .mobile_fuel import build_mobile_options, calculate_mobile_fuel
 from .non_road import build_non_road_rows, calculate_non_road
 from .on_road import (
@@ -40,6 +42,10 @@ __all__ = [
     "calculate_epa_fuel",
     "calculate_epa_fuel_emissions",
     "calculate_stationary_combustion",
+    "calculate_mobile_combustion",
+    "load_mobile_factor_sheets",
+    "calculate_refrigerant_leakage",
+    "load_refrigerant_factor_sheets",
     "build_mobile_options",
     "calculate_mobile_fuel",
     "build_on_road_gasoline_rows",

@@ -93,7 +93,7 @@ def create_project_finance_formulas():
             description='Energy consumption data from the project',
             category=FormulaCategory.PROJECT_FINANCE,
             option_code='2a',
-            data_quality_score=3,
+            data_quality_score=2,
             inputs=[
                 outstanding_amount_input,
                 total_project_equity_plus_debt_input,
@@ -112,6 +112,14 @@ def create_project_finance_formulas():
                     required=True,
                     unit='tCO2e/MWh',
                     description='Emission factor for the energy source'
+                ),
+                FormulaInput(
+                    name='process_emissions',
+                    label='Process Emissions',
+                    type=FormulaInputType.NUMBER,
+                    required=False,
+                    unit='tCO2e',
+                    description='Optional process emissions added to energy-related emissions before attribution'
                 )
             ],
             applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2]
@@ -146,6 +154,81 @@ def create_project_finance_formulas():
                 )
             ],
             applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2]
+        ),
+
+        # OPTION 3A - REVENUE × SECTOR INTENSITY
+        FormulaConfig(
+            id='3a-project-finance',
+            name='Option 3a - Revenue-based (Project Finance)',
+            description='Project revenue × sector intensity (GHG / revenue from reference table)',
+            category=FormulaCategory.PROJECT_FINANCE,
+            option_code='3a',
+            data_quality_score=4,
+            inputs=[
+                outstanding_amount_input,
+                total_project_equity_plus_debt_input,
+                FormulaInput(
+                    name='company_revenue',
+                    label='Project Revenue',
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit='PKR',
+                    description='Revenue of the project'
+                ),
+                FormulaInput(
+                    name='sector_intensity',
+                    label='Sector intensity',
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit='kgCO2e/PKR',
+                    description='Country-sector GHG intensity supplied by the caller (not invented by the engine)'
+                ),
+                FormulaInput(
+                    name='sector_intensity_unit',
+                    label='Sector intensity unit',
+                    type=FormulaInputType.TEXT,
+                    required=False,
+                    description='kgCO2e/PKR or tCO2e/PKR'
+                )
+            ],
+            applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2, ScopeType.SCOPE3]
+        ),
+
+        # OPTION 3C - OUTSTANDING × ATR × SECTOR INTENSITY
+        FormulaConfig(
+            id='3c-project-finance',
+            name='Option 3c - Asset Turnover Ratio (Project Finance)',
+            description='Outstanding × sector ATR × sector intensity (GHG / revenue from reference table)',
+            category=FormulaCategory.PROJECT_FINANCE,
+            option_code='3c',
+            data_quality_score=5,
+            inputs=[
+                outstanding_amount_input,
+                FormulaInput(
+                    name='asset_turnover_ratio',
+                    label='Asset Turnover Ratio',
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit='ratio',
+                    description='Asset turnover ratio for the sector'
+                ),
+                FormulaInput(
+                    name='sector_intensity',
+                    label='Sector intensity',
+                    type=FormulaInputType.NUMBER,
+                    required=True,
+                    unit='kgCO2e/PKR',
+                    description='Country-sector GHG intensity supplied by the caller (not invented by the engine)'
+                ),
+                FormulaInput(
+                    name='sector_intensity_unit',
+                    label='Sector intensity unit',
+                    type=FormulaInputType.TEXT,
+                    required=False,
+                    description='kgCO2e/PKR or tCO2e/PKR'
+                )
+            ],
+            applicable_scopes=[ScopeType.SCOPE1, ScopeType.SCOPE2, ScopeType.SCOPE3]
         )
     ]
 

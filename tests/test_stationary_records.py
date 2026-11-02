@@ -18,7 +18,7 @@ from fastapi_app.ghg_models import EmissionActivity, EmissionAssessment
 from fastapi_app.portfolio_models import Counterparty
 from fastapi_app.routers import calc as calc_routes
 from fastapi_app.routers.deps import require_org_context
-from tests.test_stationary_combustion import SHEETS
+from tests.test_stationary_combustion import MSW, SHEETS, WOOD
 
 ORG_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 USER_ID = uuid.UUID("33333333-3333-3333-3333-333333333333")
@@ -97,7 +97,7 @@ def _sheets():
     return sheets
 
 
-def _session(activity=None, counterparty=True, assessment=True):
+def _session(activity=None, counterparty=True, assessment=True, reporting_period="2026"):
     lookup = {}
     if assessment:
         lookup[EmissionAssessment] = EmissionAssessment(
@@ -105,6 +105,7 @@ def _session(activity=None, counterparty=True, assessment=True):
             organization_id=ORG_ID,
             user_id=USER_ID,
             framework="epa",
+            reporting_period=reporting_period,
         )
     if counterparty:
         lookup[Counterparty] = Counterparty(
@@ -168,6 +169,57 @@ def test_save_stores_calculated_tonnes_and_metadata():
     assert meta["equipment_id"] == "BLR-1"
     assert meta["source_id"] == "BLR-1"
     assert meta["period"] == "2026-10"
+    assert meta["method_version"] == "epa_stationary_biogenic_v1"
+    assert row.raw["accounting"]["treatment"] == "fossil_scope1"
+    assert row.raw["biogenic_co2_t"] == "0"
+    assert row.raw["accounting"]["gwp_version"] == "AR5"
+
+
+def test_wood_save_keeps_biogenic_co2_out_of_the_scope_1_column():
+    sheets = _sheets()
+    sheets.append(
+        {
+            "publisher": "EPA",
+            "dataset_code": "fuel_epa_1",
+            "dataset_title": "Fuel EPA 1",
+            "version_label": "imported_from_sheet",
+            "rows": [dict(WOOD)],
+        }
+    )
+    session = _session()
+    saved = _save(
+        session,
+        sheets=sheets,
+        fuel="Wood and Wood Residuals",
+        quantity=Decimal("1"),
+        unit="short ton",
+    )
+    row = session.added[0]
+    assert saved["emissions_tco2e"] == "0.020223"
+    assert row.emissions_tco2e == Decimal("0.020223")
+    assert row.raw["biogenic_co2_t"] == "1.64"
+    assert row.raw["accounting"]["treatment"] == "biogenic_co2_outside_scope1"
+    assert row.raw["gases"]["co2"]["mass_kg"] == "1640"
+    assert Decimal(row.raw["total_t_co2e"]) + Decimal(row.raw["biogenic_co2_t"]) != row.emissions_tco2e
+
+
+def test_municipal_solid_waste_is_not_saved():
+    sheets = _sheets()
+    sheets.append(
+        {
+            "publisher": "EPA",
+            "dataset_code": "fuel_epa_1",
+            "dataset_title": "Fuel EPA 1",
+            "version_label": "imported_from_sheet",
+            "rows": [dict(MSW)],
+        }
+    )
+    session = _session()
+    with pytest.raises(HTTPException) as raised:
+        _save(session, sheets=sheets, fuel="Municipal Solid Waste", quantity=Decimal("1"), unit="mmBtu")
+    assert raised.value.status_code == 422
+    assert session.added == []
+    assert session.committed is False
 
 
 def test_client_supplied_total_does_not_change_the_stored_result():
@@ -189,6 +241,33 @@ def test_invalid_input_does_not_write():
         _save(_session(), period="2026/10")
     assert bad_period.value.status_code == 422
     assert bad_period.value.detail == "period must be YYYY-MM"
+
+    session = _session()
+    with pytest.raises(HTTPException) as missing_period:
+        _save(session, period=None)
+    assert missing_period.value.status_code == 422
+    assert missing_period.value.detail == "period must be YYYY-MM"
+    assert session.added == []
+    assert session.committed is False
+
+    invalid_month = _session()
+    with pytest.raises(HTTPException) as month:
+        _save(invalid_month, period="2026-13")
+    assert month.value.status_code == 422
+    assert month.value.detail == "period must be YYYY-MM"
+    assert invalid_month.added == []
+    assert invalid_month.committed is False
+
+
+def test_period_year_must_match_the_assessment_and_writes_nothing():
+    session = _session(reporting_period="2025")
+    with pytest.raises(HTTPException) as mismatch:
+        _save(session, period="2026-10")
+    assert mismatch.value.status_code == 422
+    assert "does not match the assessment reporting year" in mismatch.value.detail
+    assert session.added == []
+    assert session.committed is False
+    assert session.rolled_back is True
 
 
 def test_counterparty_from_another_organization_is_rejected():
@@ -270,11 +349,35 @@ def test_create_endpoint_rejects_missing_credentials():
             "unit": "mmBtu",
             "assessment_id": str(ASSESSMENT_ID),
             "equipment_type": "Boiler",
+            "period": "2026-10",
             "emissions_tco2e": "0",
             "factor": 1,
         },
     )
     assert response.status_code in (401, 403)
+
+
+def test_create_endpoint_rejects_a_missing_period_without_writing(monkeypatch):
+    session = _session()
+    monkeypatch.setattr(calc_routes, "_stationary_factor_sheets", lambda db: _sheets())
+    app = FastAPI()
+    app.include_router(calc_routes.router, prefix="/api/v1")
+    app.dependency_overrides[require_org_context] = lambda: _ctx()
+    app.dependency_overrides[get_db] = lambda: session
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/calc/epa/stationary/records",
+        json={
+            "fuel": "Natural Gas",
+            "quantity": "100",
+            "unit": "mmBtu",
+            "assessment_id": str(ASSESSMENT_ID),
+            "equipment_type": "Boiler",
+        },
+    )
+    assert response.status_code == 422
+    assert session.added == []
+    assert session.committed is False
 
 
 def test_create_endpoint_stores_backend_total(monkeypatch):

@@ -164,6 +164,8 @@ def _run_case(suite: str, case: dict) -> float:
             volume=case["volume"],
             disposal_method=case["disposal_method"],
             factor=case["factor"],
+            factor_unit=case.get("factor_unit"),
+            mass_unit=case.get("mass_unit"),
         )
         assert result["success"] is True, case["id"]
         return float(result["emissions_kg"])

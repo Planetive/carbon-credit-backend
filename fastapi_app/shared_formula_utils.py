@@ -105,15 +105,120 @@ def calculate_attribution_factor(outstanding_amount: float, total_assets: float)
     return outstanding_amount / total_assets
 
 
+def _as_float(value: Any, default: float = 0.0) -> float:
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_finance_input_aliases(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Copy SPA camelCase / alternate field names into the snake_case keys the
+    engine uses. Does not invent emission factors or sector intensities.
+    """
+    out = dict(inputs or {})
+    aliases = {
+        "share_price": ("sharePrice", "share_price"),
+        "outstanding_shares": ("outstandingShares", "outstanding_shares"),
+        "total_debt": ("totalDebt", "total_debt"),
+        "minority_interest": ("minorityInterest", "minority_interest"),
+        "preferred_stock": ("preferredStock", "preferred_stock"),
+        "total_equity": ("totalEquity", "total_equity"),
+        "total_assets": ("totalAssets", "total_assets", "totalAssetsValue"),
+        "outstanding_amount": ("outstandingLoan", "outstanding_amount"),
+        "company_revenue": ("companyRevenue", "company_revenue"),
+        "asset_turnover_ratio": ("assetTurnoverRatio", "asset_turnover_ratio"),
+        "sector_intensity": ("sector_intensity", "sectorIntensity"),
+        "sector_intensity_unit": ("sector_intensity_unit", "sectorIntensityUnit"),
+        "process_emissions": ("process_emissions", "processEmissions"),
+        "total_project_equity": ("totalProjectEquity", "total_project_equity"),
+        "total_project_debt": ("totalProjectDebt", "total_project_debt"),
+        "total_project_equity_plus_debt": (
+            "total_project_equity_plus_debt",
+            "totalProjectEquityPlusDebt",
+        ),
+        "production_emission_factor": (
+            "production_emission_factor",
+            "emission_factor",
+        ),
+        "verified_emissions": ("verified_emissions", "verifiedEmissions"),
+        "unverified_emissions": ("unverified_emissions", "unverifiedEmissions"),
+        "scope1_emissions": ("scope1_emissions", "scope1Emissions"),
+        "scope2_emissions": ("scope2_emissions", "scope2Emissions"),
+        "scope3_emissions": ("scope3_emissions", "scope3Emissions"),
+        "energy_consumption": ("energy_consumption", "energyConsumption"),
+        "emission_factor": ("emission_factor", "emissionFactor"),
+        "production": ("production",),
+        "evic": ("evic",),
+        "total_equity_plus_debt": ("total_equity_plus_debt", "totalEquityPlusDebt"),
+        "facilitated_amount": ("facilitated_amount", "facilitatedAmount"),
+        "weighting_factor": ("weighting_factor", "weightingFactor"),
+    }
+    for dest, sources in aliases.items():
+        if dest in out and out[dest] not in (None, ""):
+            continue
+        for src in sources:
+            if src in out and out[src] not in (None, ""):
+                out[dest] = out[src]
+                break
+
+    computed_evic = calculate_evic(out)
+    if computed_evic > 0:
+        out["evic"] = computed_evic
+    computed_equity_debt = calculate_total_equity_plus_debt(out)
+    if computed_equity_debt > 0:
+        out["total_equity_plus_debt"] = computed_equity_debt
+    project_total = _as_float(out.get("total_project_equity")) + _as_float(
+        out.get("total_project_debt")
+    )
+    if project_total > 0:
+        out["total_project_equity_plus_debt"] = project_total
+    if _as_float(out.get("production_emission_factor")) <= 0:
+        out["production_emission_factor"] = _as_float(out.get("emission_factor"))
+    return out
+
+
+def sector_intensity_tco2e(inputs: Dict[str, Any]) -> float:
+    """Convert a caller-supplied sector intensity to tCO2e per currency unit."""
+    raw = _as_float(inputs.get("sector_intensity"))
+    unit = str(inputs.get("sector_intensity_unit") or "kgCO2e/PKR").lower()
+    if "kg" in unit:
+        return raw / 1000.0
+    return raw
+
+
+def require_positive_denominator(denominator: float, label: str = "Denominator") -> float:
+    value = _as_float(denominator)
+    if value <= 0 or value != value:  # noqa: PLR0124 — NaN check
+        raise ValueError(f"{label} must be greater than zero")
+    return value
+
+
 def calculate_evic(inputs: Dict[str, Any]) -> float:
     """
     Calculate EVIC (Enterprise Value Including Cash)
     Migrated from: calculateEVIC
     """
-    return (inputs.get('share_price', 0) * inputs.get('outstanding_shares', 0) + 
-            inputs.get('total_debt', 0) + 
-            inputs.get('minority_interest', 0) + 
-            inputs.get('preferred_stock', 0))
+    share_price = _as_float(inputs.get("share_price", inputs.get("sharePrice")))
+    outstanding_shares = _as_float(
+        inputs.get("outstanding_shares", inputs.get("outstandingShares"))
+    )
+    total_debt = _as_float(inputs.get("total_debt", inputs.get("totalDebt")))
+    minority_interest = _as_float(
+        inputs.get("minority_interest", inputs.get("minorityInterest"))
+    )
+    preferred_stock = _as_float(
+        inputs.get("preferred_stock", inputs.get("preferredStock"))
+    )
+    return (
+        share_price * outstanding_shares
+        + total_debt
+        + minority_interest
+        + preferred_stock
+    )
 
 
 def calculate_total_equity_plus_debt(inputs: Dict[str, Any]) -> float:
@@ -121,7 +226,9 @@ def calculate_total_equity_plus_debt(inputs: Dict[str, Any]) -> float:
     Calculate Total Equity + Debt
     Migrated from: calculateTotalEquityPlusDebt
     """
-    return inputs.get('total_equity', 0) + inputs.get('total_debt', 0)
+    return _as_float(inputs.get("total_equity", inputs.get("totalEquity"))) + _as_float(
+        inputs.get("total_debt", inputs.get("totalDebt"))
+    )
 
 
 def calculate_financed_emissions(outstanding_amount: float, denominator: float, emission_data: float) -> float:
@@ -129,7 +236,8 @@ def calculate_financed_emissions(outstanding_amount: float, denominator: float, 
     Calculate Financed Emissions
     Migrated from: calculateFinancedEmissions
     """
-    return (outstanding_amount / denominator) * emission_data
+    denom = require_positive_denominator(denominator)
+    return (_as_float(outstanding_amount) / denom) * _as_float(emission_data)
 
 
 def create_common_calculation_steps(
@@ -207,8 +315,9 @@ def calculate_facilitated_emissions(
     Calculate facilitated emissions
     Formula: (Facilitated Amount / Company Value) × Weighting Factor × Emission Data
     """
-    attribution_factor = facilitated_amount / company_value
-    return attribution_factor * weighting_factor * emission_data
+    denom = require_positive_denominator(company_value, "Company value")
+    attribution_factor = _as_float(facilitated_amount) / denom
+    return attribution_factor * _as_float(weighting_factor) * _as_float(emission_data)
 
 
 def validate_financial_inputs(inputs: Dict[str, Any], company_type: str) -> List[str]:

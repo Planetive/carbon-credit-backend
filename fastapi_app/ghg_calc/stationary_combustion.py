@@ -4,6 +4,23 @@ Backend-authoritative EPA Scope 1 stationary combustion.
 Looks up CO2, CH4, and N2O on Fuel EPA 1/2/3. The caller cannot supply the
 factor or the total. CH4 and N2O sheet values are grams of that gas; CO2 sheet
 values are kilograms of CO2. GWP is applied after the gram-to-kilogram conversion.
+
+Accounting, version epa_stationary_biogenic_v1:
+- GHG Protocol Corporate Standard: CO2 from biomass combustion is reported
+  outside the scopes. CH4 and N2O from that combustion stay in Scope 1.
+  Peat is not biomass, so peat CO2 stays in Scope 1.
+- IPCC 2006 Volume 2, Chapter 1, Table 1.1: peat is grouped with fossil fuels
+  because it accumulates on geological timescales. Chapter 2 treats biomass CO2
+  as a memo item.
+- EPA Emission Factors for Greenhouse Gas Inventories, Table 1, supplies the
+  factors. Its biomass heading is a lookup group. A fuel in that heading is
+  biogenic only when its name is one of the documented biomass rows below.
+  Peat is the exception and stays in Scope 1.
+
+Older epa_stationary_v1 records keep the totals already stored. This module
+does not rewrite them. Fuels with no documented biogenic fraction, including
+municipal solid waste and percentage blends, are returned for review and are
+not saved as a guessed Scope 1 or biogenic total.
 """
 
 from __future__ import annotations
@@ -61,6 +78,46 @@ _GRAM_GASES = ("ch4", "n2o")
 _GASES = ("co2", "ch4", "n2o")
 _MILLION = Decimal("1000000")
 _THOUSAND = Decimal("1000")
+
+# New saves use this version. Older epa_stationary_v1 records keep their stored totals.
+ACCOUNTING_VERSION = "epa_stationary_biogenic_v1"
+METHODOLOGY = (
+    "GHG Protocol Corporate Standard: CO2 from qualifying biomass is reported "
+    "outside Scope 1, while CH4 and N2O from that combustion stay in Scope 1. "
+    "Masses use the EPA stationary combustion factors on the fuel row. "
+    "Peat is not biomass under the GHG Protocol or IPCC 2006 Volume 2, so peat CO2 stays in Scope 1 "
+    "even when an EPA factor table files peat with biomass fuels."
+)
+
+# EPA Emission Factors for Greenhouse Gas Inventories, Table 1 biomass rows whose
+# carbon is biogenic. The sheet category is not used by itself.
+_BIOGENIC_FUELS = frozenset(
+    {
+        "wood and wood residuals",
+        "wood",
+        "agricultural byproducts",
+        "solid byproducts",
+        "landfill gas",
+        "other biomass gases",
+        "biodiesel (100%)",
+        "ethanol (100%)",
+        "rendered animal fat",
+        "vegetable oil",
+        "bagasse",
+        "black liquor",
+        "kraft black liquor",
+    }
+)
+_PEAT_FUELS = frozenset({"peat"})
+_REVIEW_FUELS = frozenset(
+    {
+        "municipal solid waste",
+        "msw",
+        "mixed municipal solid waste",
+        "b20",
+        "e85",
+    }
+)
 
 
 def canonical_consumption_unit(unit: str) -> Optional[str]:
@@ -259,6 +316,31 @@ def _gwp_set(version: str) -> Optional[Dict[str, Decimal]]:
     return GWP_SETS.get(str(version).strip().upper())
 
 
+def _fuel_key(value: str) -> str:
+    return " ".join(str(value).casefold().split())
+
+
+def classify_stationary_fuel(fuel: str, category: str) -> str:
+    """
+    fossil_scope1, peat_fossil_scope1, biogenic_co2_outside_scope1, or needs_review.
+
+    A fuel filed under an EPA biomass heading is not biogenic unless its name is
+    one of the documented biomass rows. Blends and mixed waste have no biogenic
+    fraction on these factor rows, so they are not split.
+    """
+    name = _fuel_key(fuel)
+    group = _fuel_key(category)
+    if name in _PEAT_FUELS or name.startswith("peat "):
+        return "peat_fossil_scope1"
+    if name in _BIOGENIC_FUELS:
+        return "biogenic_co2_outside_scope1"
+    if name in _REVIEW_FUELS or "%" in name or " blend" in f" {name}":
+        return "needs_review"
+    if "biomass" in group:
+        return "needs_review"
+    return "fossil_scope1"
+
+
 def calculate_stationary_combustion(
     *,
     fuel: str,
@@ -321,6 +403,8 @@ def calculate_stationary_combustion(
     gases: Dict[str, Dict[str, str]] = {}
     factors: Dict[str, Dict[str, str]] = {}
     total = Decimal("0")
+    co2_mass = Decimal("0")
+    co2_co2e = Decimal("0")
     for gas in _GASES:
         sheet_factor = bundle[gas]
         mass = amount * sheet_factor
@@ -329,6 +413,9 @@ def calculate_stationary_combustion(
         gwp_value = gwp["CO2"] if gas == "co2" else gwp[gas.upper()]
         co2e = mass * gwp_value
         total += co2e
+        if gas == "co2":
+            co2_mass = mass
+            co2_co2e = co2e
         gases[gas] = {
             "mass_kg": _decimal_text(mass),
             "gwp": _decimal_text(gwp_value),
@@ -339,6 +426,7 @@ def calculate_stationary_combustion(
             "unit": _FACTOR_UNITS[physical][gas],
         }
 
+    treatment = classify_stationary_fuel(entry["fuel"], entry["category"])
     source = dict(entry["source"])
     source["gwp_version"] = str(gwp_version).strip().upper()
     source["gwp"] = {name: _decimal_text(value) for name, value in gwp.items()}
@@ -347,15 +435,66 @@ def calculate_stationary_combustion(
     if entry.get("factor_row_id"):
         source["factor_row_id"] = entry["factor_row_id"]
 
+    if treatment == "needs_review":
+        gases["co2"]["reporting"] = "unassigned"
+        return {
+            "success": False,
+            "review_required": True,
+            "error": (
+                f"{entry['fuel']} has no documented biogenic fraction. "
+                "Its CO2 is not added to Scope 1 and is not reported as biogenic CO2."
+            ),
+            "fuel": entry["fuel"],
+            "category": entry["category"],
+            "quantity": _decimal_text(amount),
+            "unit": physical,
+            "gases": gases,
+            "total_kg_co2e": None,
+            "total_t_co2e": None,
+            "biogenic_co2_kg": None,
+            "biogenic_co2_t": None,
+            "factors": factors,
+            "factor_source": source,
+            "accounting": {
+                "version": ACCOUNTING_VERSION,
+                "treatment": treatment,
+                "methodology": METHODOLOGY,
+                "gwp_version": source["gwp_version"],
+            },
+        }
+
+    if treatment == "biogenic_co2_outside_scope1":
+        scope_total = total - co2_co2e
+        biogenic_kg = co2_mass
+        gases["co2"]["reporting"] = "biogenic_outside_scope1"
+    else:
+        scope_total = total
+        biogenic_kg = Decimal("0")
+        gases["co2"]["reporting"] = "scope1"
+
+    accounting = {
+        "version": ACCOUNTING_VERSION,
+        "treatment": treatment,
+        "methodology": METHODOLOGY,
+        "gwp_version": source["gwp_version"],
+        "biogenic_co2_kg": _decimal_text(biogenic_kg),
+        "biogenic_co2_t": _decimal_text(biogenic_kg / _THOUSAND),
+        "scope1_kg_co2e": _decimal_text(scope_total),
+        "scope1_t_co2e": _decimal_text(scope_total / _THOUSAND),
+    }
     return {
         "success": True,
+        "review_required": False,
         "fuel": entry["fuel"],
         "category": entry["category"],
         "quantity": _decimal_text(amount),
         "unit": physical,
         "gases": gases,
-        "total_kg_co2e": _decimal_text(total),
-        "total_t_co2e": _decimal_text(total / _THOUSAND),
+        "total_kg_co2e": accounting["scope1_kg_co2e"],
+        "total_t_co2e": accounting["scope1_t_co2e"],
+        "biogenic_co2_kg": accounting["biogenic_co2_kg"],
+        "biogenic_co2_t": accounting["biogenic_co2_t"],
         "factors": factors,
         "factor_source": source,
+        "accounting": accounting,
     }

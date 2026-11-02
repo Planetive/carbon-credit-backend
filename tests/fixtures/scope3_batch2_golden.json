@@ -1,12 +1,29 @@
 {
-  "_comment": "Batch 2 Scope 3 explicit-factor goldens (SPA Scope3Section). Sync to SPA parity/cases.json later. Never change formulas to pass.",
+  "_comment": "Batch 2 Scope 3 unit-aware goldens. Freight/spend require factor_unit. Never invent factors.",
   "freight": [
     {
-      "id": "freight_basic",
+      "id": "freight_short_ton_mile",
       "distance": 100,
       "weight": 50,
       "co2_factor": 0.12,
-      "expected_emissions_kg": 600.0
+      "factor_unit": "short ton-mile",
+      "expected_emissions_kg": 0.41096771754547373
+    },
+    {
+      "id": "freight_vehicle_mile",
+      "distance": 100,
+      "weight": 0,
+      "co2_factor": 0.394,
+      "factor_unit": "vehicle-mile",
+      "expected_emissions_kg": 24.482085824002386
+    },
+    {
+      "id": "freight_1000kg_not_short_ton",
+      "distance": 100,
+      "weight": 1000,
+      "co2_factor": 1.086,
+      "factor_unit": "short ton-mile",
+      "expected_emissions_kg": 74.38515687573076
     }
   ],
   "business_travel": [
@@ -31,14 +48,39 @@
       "employees": 10,
       "distance": 20,
       "co2_factor": 0.1,
+      "unit": "kg CO2e/km",
+      "distance_basis": "annual_total",
       "expected_emissions_kg": 20.0
+    },
+    {
+      "id": "commute_one_way_days",
+      "employees": 2,
+      "distance": 10,
+      "co2_factor": 0.1,
+      "unit": "kg CO2e/km",
+      "distance_basis": "one_way",
+      "working_days_per_year": 200,
+      "expected_emissions_kg": 800.0
+    },
+    {
+      "id": "commute_round_trip_no_double",
+      "employees": 2,
+      "distance": 20,
+      "co2_factor": 0.1,
+      "unit": "kg CO2e/km",
+      "distance_basis": "round_trip",
+      "working_days_per_year": 200,
+      "expected_emissions_kg": 800.0
     }
   ],
   "spend_based": [
     {
-      "id": "spend_basic",
+      "id": "spend_kg_per_usd",
       "amount": 1000,
       "emission_factor": 0.35,
+      "factor_unit": "kg CO2e/2022 USD, purchaser price",
+      "activity_currency": "USD",
+      "activity_price_year": 2022,
       "expected_emissions_kg": 350.0
     }
   ],

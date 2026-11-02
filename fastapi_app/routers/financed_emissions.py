@@ -14,6 +14,17 @@ from ..auth_org import OrgContext
 from ..calculation_engine import CalculationEngine
 from ..db import get_db
 from ..finance_models import CompanyType
+from ..financed_scope_breakdown import breakdown_api_fields
+from ..financing_instance import (
+    FINANCING_INSTANCE_FIELD,
+    can_upsert_by_instance,
+    ensure_identity_in_results,
+    extract_financing_instance_id,
+    find_row_by_financing_instance,
+    financing_instance_json_expr,
+    normalize_financing_instance_id,
+    preserve_financing_instance_in_inputs,
+)
 from ..ghg_models import FinancedEmission
 from ..ppp_gdp import apply_ppp_resolution, is_sovereign_formula
 from ..schemas_v1 import (
@@ -76,15 +87,127 @@ def _result_to_dict(calc_result: Any) -> Dict[str, Any]:
             )
         else:
             steps.append(step)
-    return {
+    metadata = dict(calc_result.metadata or {})
+    metadata.setdefault("emissions_unit", "tCO2e")
+    payload = {
         "attribution_factor": calc_result.attribution_factor,
         "emission_factor": calc_result.emission_factor,
         "financed_emissions": calc_result.financed_emissions,
         "data_quality_score": calc_result.data_quality_score,
         "methodology": calc_result.methodology,
         "calculation_steps": steps,
-        "metadata": calc_result.metadata,
+        "emissions_unit": "tCO2e",
+        "metadata": metadata,
     }
+    payload.update(breakdown_api_fields(metadata))
+    return payload
+
+
+def _persist_financed_row(
+    db: Session,
+    *,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    calc_kind: str,
+    formula_id: Optional[str],
+    fields: Dict[str, Any],
+) -> FinancedEmission:
+    """
+    Insert a new row, or update the existing non-aggregate row that shares the
+    same (organization_id, counterparty_id, calc_kind, inputs.financing_instance_id).
+
+    Missing instance IDs always insert — never overwrite by formula_id alone.
+    Aggregate rows always insert (identity uniqueness does not apply).
+    """
+    inputs = preserve_financing_instance_in_inputs(fields.get("inputs"))
+    instance_id = extract_financing_instance_id(inputs)
+    results = ensure_identity_in_results(fields.get("results"), instance_id)
+    fields = {**fields, "inputs": inputs, "results": results}
+
+    existing: Optional[FinancedEmission] = None
+    if can_upsert_by_instance(
+        formula_id=formula_id, financing_instance_id=instance_id
+    ):
+        assert instance_id is not None
+        existing = find_row_by_financing_instance(
+            db,
+            organization_id=organization_id,
+            calc_kind=calc_kind,
+            financing_instance_id=instance_id,
+            counterparty_id=fields.get("counterparty_id"),
+            for_update=True,
+        )
+
+    if existing is not None:
+        for key, value in fields.items():
+            setattr(existing, key, value)
+        # Recalculation of one loan must not change ownership metadata.
+        existing.organization_id = organization_id
+        existing.user_id = user_id
+        db.add(existing)
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Concurrent save conflict for financing_instance_id; "
+                    f"retry the request. ({exc.orig})"
+                ),
+            ) from exc
+        db.refresh(existing)
+        return existing
+
+    row = FinancedEmission(
+        organization_id=organization_id,
+        user_id=user_id,
+        formula_id=formula_id,
+        **fields,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        # Concurrent insert of the same instance id (after unique index exists).
+        if can_upsert_by_instance(
+            formula_id=formula_id, financing_instance_id=instance_id
+        ):
+            assert instance_id is not None
+            raced = find_row_by_financing_instance(
+                db,
+                organization_id=organization_id,
+                calc_kind=calc_kind,
+                financing_instance_id=instance_id,
+                counterparty_id=fields.get("counterparty_id"),
+                for_update=True,
+            )
+            if raced is not None:
+                for key, value in fields.items():
+                    setattr(raced, key, value)
+                raced.organization_id = organization_id
+                raced.user_id = user_id
+                db.add(raced)
+                try:
+                    db.commit()
+                except IntegrityError as exc2:
+                    db.rollback()
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            "Concurrent save conflict for financing_instance_id; "
+                            f"retry the request. ({exc2.orig})"
+                        ),
+                    ) from exc2
+                db.refresh(raced)
+                return raced
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Could not persist financed emission: {exc.orig}",
+        ) from exc
+    db.refresh(row)
+    return row
 
 
 @router.get("", response_model=List[FinancedEmissionOut])
@@ -92,6 +215,7 @@ def list_financed_emissions(
     calc_kind: Optional[str] = None,
     counterparty_id: Optional[uuid.UUID] = None,
     status_filter: Optional[str] = Query(default=None, alias="status"),
+    financing_instance_id: Optional[str] = Query(default=None),
     ctx: OrgContext = Depends(require_org_context),
     db: Session = Depends(get_db),
 ) -> List[FinancedEmission]:
@@ -104,6 +228,10 @@ def list_financed_emissions(
         q = q.filter(FinancedEmission.counterparty_id == counterparty_id)
     if status_filter:
         q = q.filter(FinancedEmission.status == status_filter)
+    instance = normalize_financing_instance_id(financing_instance_id)
+    if instance:
+        # Match unique/lookup index expression: btrim(inputs->>'financing_instance_id')
+        q = q.filter(financing_instance_json_expr() == instance)
     return q.order_by(FinancedEmission.created_at.desc()).all()
 
 
@@ -114,34 +242,27 @@ def create_financed_emission(
     db: Session = Depends(get_db),
 ) -> FinancedEmission:
     calc_kind = _validate_calc_kind(body.calc_kind)
-    row = FinancedEmission(
+    return _persist_financed_row(
+        db,
         organization_id=ctx.organization_id,
         user_id=ctx.user.id,
-        counterparty_id=body.counterparty_id,
-        exposure_id=body.exposure_id,
-        questionnaire_id=body.questionnaire_id,
         calc_kind=calc_kind,
-        company_type=body.company_type,
         formula_id=body.formula_id,
-        formula_name=body.formula_name,
-        inputs=body.inputs or {},
-        results=body.results or {},
-        financed_emissions=body.financed_emissions,
-        attribution_factor=body.attribution_factor,
-        data_quality_score=body.data_quality_score,
-        status=body.status,
+        fields={
+            "counterparty_id": body.counterparty_id,
+            "exposure_id": body.exposure_id,
+            "questionnaire_id": body.questionnaire_id,
+            "calc_kind": calc_kind,
+            "company_type": body.company_type,
+            "formula_name": body.formula_name,
+            "inputs": body.inputs or {},
+            "results": body.results or {},
+            "financed_emissions": body.financed_emissions,
+            "attribution_factor": body.attribution_factor,
+            "data_quality_score": body.data_quality_score,
+            "status": body.status,
+        },
     )
-    db.add(row)
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Could not create financed emission: {exc.orig}",
-        ) from exc
-    db.refresh(row)
-    return row
 
 
 @router.post("/calculate", response_model=FinancedCalculateResponse)
@@ -153,6 +274,9 @@ def calculate_and_persist(
     """
     Run the existing calculation engine and optionally save to app.financed_emissions.
     Does not change formula logic — thin persist wrapper around CalculationEngine.
+
+    When inputs.financing_instance_id is present on a non-aggregate formula,
+    persist updates that instance in place instead of inserting a duplicate.
     """
     calc_kind = _validate_calc_kind(body.calc_kind)
     company_type = (
@@ -160,7 +284,8 @@ def calculate_and_persist(
         if body.company_type in ("listed", CompanyType.LISTED.value)
         else CompanyType.PRIVATE
     )
-    inputs = dict(body.inputs or {})
+    inputs = preserve_financing_instance_in_inputs(body.inputs)
+    instance_id = extract_financing_instance_id(inputs)
     if inputs.get("resolve_ppp_gdp") or is_sovereign_formula(body.formula_id):
         try:
             inputs = apply_ppp_resolution(
@@ -172,6 +297,9 @@ def calculate_and_persist(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
+        # PPP enrichment must not drop the financing instance identity.
+        if instance_id:
+            inputs[FINANCING_INSTANCE_FIELD] = instance_id
     try:
         calc_result = _engine().calculate(
             formula_id=body.formula_id,
@@ -186,35 +314,29 @@ def calculate_and_persist(
             detail="Internal calculation error",
         ) from exc
 
-    result_dict = _result_to_dict(calc_result)
+    result_dict = ensure_identity_in_results(_result_to_dict(calc_result), instance_id)
     record: Optional[FinancedEmission] = None
     if body.persist:
-        record = FinancedEmission(
+        record = _persist_financed_row(
+            db,
             organization_id=ctx.organization_id,
             user_id=ctx.user.id,
-            counterparty_id=body.counterparty_id,
-            exposure_id=body.exposure_id,
             calc_kind=calc_kind,
-            company_type=body.company_type,
             formula_id=body.formula_id,
-            formula_name=result_dict.get("methodology"),
-            inputs=inputs,
-            results=result_dict,
-            financed_emissions=Decimal(str(calc_result.financed_emissions)),
-            attribution_factor=Decimal(str(calc_result.attribution_factor)),
-            data_quality_score=Decimal(str(calc_result.data_quality_score)),
-            status="completed",
+            fields={
+                "counterparty_id": body.counterparty_id,
+                "exposure_id": body.exposure_id,
+                "calc_kind": calc_kind,
+                "company_type": body.company_type,
+                "formula_name": result_dict.get("methodology"),
+                "inputs": inputs,
+                "results": result_dict,
+                "financed_emissions": Decimal(str(calc_result.financed_emissions)),
+                "attribution_factor": Decimal(str(calc_result.attribution_factor)),
+                "data_quality_score": Decimal(str(calc_result.data_quality_score)),
+                "status": "completed",
+            },
         )
-        db.add(record)
-        try:
-            db.commit()
-        except IntegrityError as exc:
-            db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Could not persist calculation: {exc.orig}",
-            ) from exc
-        db.refresh(record)
 
     return FinancedCalculateResponse(
         success=True,
@@ -243,10 +365,31 @@ def patch_financed_emission(
     data = body.model_dump(exclude_unset=True)
     if "calc_kind" in data and data["calc_kind"] is not None:
         data["calc_kind"] = _validate_calc_kind(data["calc_kind"])
+    if "inputs" in data:
+        data["inputs"] = preserve_financing_instance_in_inputs(data.get("inputs"))
+        instance_id = extract_financing_instance_id(data["inputs"])
+        if "results" in data:
+            data["results"] = ensure_identity_in_results(
+                data.get("results"), instance_id
+            )
+        elif instance_id:
+            data["results"] = ensure_identity_in_results(
+                dict(row.results or {}), instance_id
+            )
     for key, value in data.items():
         setattr(row, key, value)
     db.add(row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Update conflicts with another financing_instance_id under this "
+                f"organization/counterparty/calc_kind. ({exc.orig})"
+            ),
+        ) from exc
     db.refresh(row)
     return row
 

@@ -162,12 +162,16 @@ def test_waste(golden):
                 disposal_method=case["disposal_method"],
                 material=case["material"],
                 materials=materials,
+                factor_unit=case.get("factor_unit"),
+                mass_unit=case.get("mass_unit"),
             )
         else:
             result = calculate_waste(
                 volume=case["volume"],
                 disposal_method=case["disposal_method"],
                 factor=case["factor"],
+                factor_unit=case.get("factor_unit"),
+                mass_unit=case.get("mass_unit"),
             )
         assert result["success"] is True, case["id"]
         assert result["emissions_kg"] == pytest.approx(
