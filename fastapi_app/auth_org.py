@@ -14,7 +14,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
@@ -82,3 +82,15 @@ def get_current_org_context(
         organization_id=organization_id,
         role=role,
     )
+
+
+def require_org_context(
+    ctx: OrgContext = Depends(get_current_org_context),
+) -> OrgContext:
+    """Require an authenticated user with organization membership."""
+    if ctx.organization_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Organization membership is required",
+        )
+    return ctx
