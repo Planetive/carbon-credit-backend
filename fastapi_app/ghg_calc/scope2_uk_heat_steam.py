@@ -43,7 +43,16 @@ _TONNE = Decimal("1000")
 _QUANT = Decimal("0.00000001")
 _MATCH = Decimal("0.00001")
 _KWH_PER_MWH = Decimal("1000")
-UK_NAMES = {"uk", "u.k.", "united kingdom", "great britain", "britain", "gb"}
+UK_NAMES = {
+    "uk",
+    "u.k.",
+    "united kingdom",
+    "great britain",
+    "britain",
+    "gb",
+    "united kingdom of great britain and northern ireland",
+    "united kingdom of great britain and northern ireland (the)",
+}
 PAKISTAN_NAMES = {"pakistan", "pk"}
 
 

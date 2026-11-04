@@ -20,11 +20,15 @@ from ..financing_instance import (
     can_upsert_by_instance,
     ensure_identity_in_results,
     extract_financing_instance_id,
+    extract_reporting_year,
     find_row_by_financing_instance,
     financing_instance_json_expr,
     normalize_financing_instance_id,
+    normalize_reporting_year,
     preserve_financing_instance_in_inputs,
+    year_aware_identity_available,
 )
+from ..uop_drafts import is_uop_formula_id, uop_reportable_blocked_detail
 from ..ghg_models import FinancedEmission
 from ..ppp_gdp import apply_ppp_resolution, is_sovereign_formula
 from ..schemas_v1 import (
@@ -121,6 +125,11 @@ def _persist_financed_row(
     """
     inputs = preserve_financing_instance_in_inputs(fields.get("inputs"))
     instance_id = extract_financing_instance_id(inputs)
+    requested_year = normalize_reporting_year(
+        inputs.get("reporting_year") or inputs.get("reportingYear")
+    )
+    if requested_year:
+        inputs["reporting_year"] = requested_year
     results = ensure_identity_in_results(fields.get("results"), instance_id)
     fields = {**fields, "inputs": inputs, "results": results}
 
@@ -135,12 +144,41 @@ def _persist_financed_row(
             calc_kind=calc_kind,
             financing_instance_id=instance_id,
             counterparty_id=fields.get("counterparty_id"),
+            reporting_year=requested_year,
             for_update=True,
         )
+        if existing is None and requested_year:
+            other = find_row_by_financing_instance(
+                db,
+                organization_id=organization_id,
+                calc_kind=calc_kind,
+                financing_instance_id=instance_id,
+                counterparty_id=fields.get("counterparty_id"),
+                for_update=False,
+            )
+            other_year = extract_reporting_year(other) if other is not None else None
+            if other is not None and other_year and other_year != requested_year:
+                if not year_aware_identity_available(db):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "REPORTING_YEAR_CONFLICT",
+                            "message": (
+                                "app.financed_emissions unique identity (migration 0014) "
+                                "does not include reporting year. Saving a different year "
+                                "would overwrite the existing instance. Apply prepared "
+                                "migration 0017 before storing a second reporting year."
+                            ),
+                            "existing_reporting_year": other_year,
+                            "requested_reporting_year": requested_year,
+                            "financing_instance_id": instance_id,
+                        },
+                    )
 
     if existing is not None:
         for key, value in fields.items():
             setattr(existing, key, value)
+        existing.formula_id = formula_id
         # Recalculation of one loan must not change ownership metadata.
         existing.organization_id = organization_id
         existing.user_id = user_id
@@ -181,6 +219,7 @@ def _persist_financed_row(
                 calc_kind=calc_kind,
                 financing_instance_id=instance_id,
                 counterparty_id=fields.get("counterparty_id"),
+                reporting_year=requested_year,
                 for_update=True,
             )
             if raced is not None:
@@ -242,6 +281,11 @@ def create_financed_emission(
     db: Session = Depends(get_db),
 ) -> FinancedEmission:
     calc_kind = _validate_calc_kind(body.calc_kind)
+    if is_uop_formula_id(body.formula_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=uop_reportable_blocked_detail(),
+        )
     return _persist_financed_row(
         db,
         organization_id=ctx.organization_id,
@@ -279,6 +323,11 @@ def calculate_and_persist(
     persist updates that instance in place instead of inserting a duplicate.
     """
     calc_kind = _validate_calc_kind(body.calc_kind)
+    if is_uop_formula_id(body.formula_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=uop_reportable_blocked_detail(),
+        )
     company_type = (
         CompanyType.LISTED
         if body.company_type in ("listed", CompanyType.LISTED.value)

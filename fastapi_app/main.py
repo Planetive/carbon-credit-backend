@@ -33,6 +33,8 @@ from .routers.company_emissions import router as company_emissions_router
 from .routers.emission_assessments import router as emission_assessments_router
 from .routers.emission_activities import router as emission_activities_router
 from .routers.financed_emissions import router as financed_emissions_router
+from .routers.uop_drafts import router as uop_drafts_router
+from .routers.uop_calculate import router as uop_calculate_router
 from .routers.catalog import router as catalog_router
 from .routers.factors import router as factors_router
 from .routers.calc import router as calc_router
@@ -65,6 +67,8 @@ app.include_router(company_emissions_router, prefix="/api/v1")
 app.include_router(emission_assessments_router, prefix="/api/v1")
 app.include_router(emission_activities_router, prefix="/api/v1")
 app.include_router(financed_emissions_router, prefix="/api/v1")
+app.include_router(uop_drafts_router, prefix="/api/v1")
+app.include_router(uop_calculate_router, prefix="/api/v1")
 app.include_router(catalog_router, prefix="/api/v1")
 app.include_router(factors_router, prefix="/api/v1")
 app.include_router(calc_router, prefix="/api/v1")

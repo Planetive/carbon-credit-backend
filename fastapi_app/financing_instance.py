@@ -13,10 +13,12 @@ from __future__ import annotations
 import uuid
 from typing import Any, Dict, Optional, Tuple
 
-from sqlalchemy import String, cast, func
+from sqlalchemy import String, cast, func, text
 from sqlalchemy.orm import Session
 
 from .ghg_models import FinancedEmission
+
+YEAR_AWARE_INDEX = "uq_financed_emissions_financing_instance_year"
 
 FINANCING_INSTANCE_FIELD = "financing_instance_id"
 FINANCING_IDENTITY_STEP = "__financing_identity__"
@@ -55,6 +57,72 @@ def financing_instance_json_expr():
 def non_aggregate_formula_sql():
     """SQL predicate matching unique index aggregate exclusion (case-insensitive)."""
     return func.lower(func.coalesce(FinancedEmission.formula_id, "")) != AGGREGATE_FORMULA_ID
+
+
+def normalize_reporting_year(value: Any) -> Optional[str]:
+    text_value = str(value or "").strip()
+    return text_value or None
+
+
+def extract_reporting_year(source: Any) -> Optional[str]:
+    if source is None:
+        return None
+    column_year = normalize_reporting_year(getattr(source, "reporting_year", None))
+    if column_year:
+        return column_year
+    if isinstance(source, dict):
+        direct = normalize_reporting_year(
+            source.get("reporting_year") or source.get("reportingYear")
+        )
+        if direct:
+            return direct
+        for key in ("inputs", "results"):
+            nested = source.get(key)
+            if isinstance(nested, dict):
+                found = normalize_reporting_year(
+                    nested.get("reporting_year") or nested.get("reportingYear")
+                )
+                if found:
+                    return found
+        return None
+    inputs = getattr(source, "inputs", None)
+    if isinstance(inputs, dict):
+        found = normalize_reporting_year(
+            inputs.get("reporting_year") or inputs.get("reportingYear")
+        )
+        if found:
+            return found
+    results = getattr(source, "results", None)
+    if isinstance(results, dict):
+        return normalize_reporting_year(
+            results.get("reporting_year") or results.get("reportingYear")
+        )
+    return None
+
+
+def year_aware_identity_available(db: Session) -> bool:
+    """True when migration 0017's unique index is present (or a test session opts in)."""
+    if getattr(db, "year_aware_identity", False):
+        return True
+    bind = getattr(db, "get_bind", lambda: None)()
+    dialect = getattr(getattr(bind, "dialect", None), "name", "")
+    if dialect != "postgresql":
+        return False
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT 1
+                FROM pg_indexes
+                WHERE schemaname = 'app'
+                  AND indexname = :name
+                """
+            ),
+            {"name": YEAR_AWARE_INDEX},
+        ).first()
+        return row is not None
+    except Exception:
+        return False
 
 
 def extract_financing_instance_id(source: Any) -> Optional[str]:
@@ -158,10 +226,12 @@ def find_row_by_financing_instance(
     calc_kind: str,
     financing_instance_id: str,
     counterparty_id: Optional[uuid.UUID],
+    reporting_year: Optional[str] = None,
     for_update: bool = False,
 ) -> Optional[FinancedEmission]:
     """
     Locate the active row for (organization_id, counterparty_id, calc_kind, instance).
+    When reporting_year is provided, only that year matches (0017 identity).
     Aggregates are excluded. Does not invent matches for legacy rows without an id.
     """
     instance_id = normalize_financing_instance_id(financing_instance_id)
@@ -171,10 +241,6 @@ def find_row_by_financing_instance(
     q = db.query(FinancedEmission).filter(
         FinancedEmission.organization_id == organization_id,
         FinancedEmission.calc_kind == calc_kind,
-        # Match unique index expression: btrim(inputs->>'financing_instance_id')
-        financing_instance_json_expr() == instance_id,
-        # Match unique index predicate: lower(COALESCE(formula_id,'')) <> 'aggregate'
-        non_aggregate_formula_sql(),
     )
     if counterparty_id is None:
         q = q.filter(FinancedEmission.counterparty_id.is_(None))
@@ -184,7 +250,20 @@ def find_row_by_financing_instance(
     if for_update:
         q = q.with_for_update()
 
-    return q.order_by(FinancedEmission.updated_at.desc()).first()
+    # Unique index uses btrim(inputs->>'financing_instance_id'). Verify in Python
+    # so in-memory test sessions and JSON-expression dialects agree.
+    matched = [
+        row
+        for row in q.order_by(FinancedEmission.updated_at.desc()).all()
+        if extract_financing_instance_id(getattr(row, "inputs", None)) == instance_id
+        and not is_aggregate_formula(row.formula_id)
+    ]
+    wanted_year = normalize_reporting_year(reporting_year)
+    if wanted_year is not None:
+        matched = [
+            row for row in matched if extract_reporting_year(row) == wanted_year
+        ]
+    return matched[0] if matched else None
 
 
 def apply_row_fields(row: FinancedEmission, fields: Dict[str, Any]) -> FinancedEmission:

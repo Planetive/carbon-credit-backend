@@ -10,7 +10,7 @@ from fastapi_app.auth_org import OrgContext
 from fastapi_app.factor_models import FactorDataset, FactorRow
 from fastapi_app.ghg_calc.scope2_uk_electricity import calculate_uk_location_electricity
 from fastapi_app.ghg_calc.scope2_uk_heat_steam import calculate_uk_purchased_heat_steam
-from fastapi_app.ghg_calc.scope2_uk_records import save_uk_electricity_record
+from fastapi_app.ghg_calc.scope2_uk_records import save_uk_electricity_record, save_uk_heat_steam_record
 from fastapi_app.ghg_models import EmissionActivity, EmissionAssessment
 from fastapi_app.portfolio_models import Counterparty
 
@@ -437,6 +437,113 @@ def test_co2_only_fallback_epa_steam_and_pakistan_do_not_calculate():
         period="2025-01",
     )
     assert onsite["status"] == "onsite_combustion"
+
+
+def test_uk_2026_heat_uses_the_desnz_district_heat_factor():
+    row = _heat(
+        attributes={
+            "publication_year": 2026,
+            "reporting_year": 2026,
+            "source_document": "DESNZ conversion factors 2026, district heat and steam",
+        }
+    )
+    session = FakeSession(
+        [
+            (
+                row,
+                _dataset(
+                    publisher="Department for Energy Security and Net Zero (DESNZ)",
+                    version_label="2026",
+                ),
+            )
+        ]
+    )
+    result = calculate_uk_purchased_heat_steam(
+        session,
+        country="United Kingdom",
+        energy_form="purchased_heat",
+        quantity=Decimal("10"),
+        unit="kWh",
+        period="2026-01",
+    )
+    assert result["ok"] is True
+    assert result["save_allowed"] is True
+    assert result["factor"]["value"] == "0.17529000"
+    assert result["total_kg_co2e"] == "1.75290000"
+    long_name = calculate_uk_purchased_heat_steam(
+        session,
+        country="United Kingdom of Great Britain and Northern Ireland",
+        energy_form="purchased_heat",
+        quantity=Decimal("10"),
+        unit="kWh",
+        period="2026-01",
+    )
+    assert long_name["ok"] is True
+    assert long_name["factor"]["value"] == "0.17529000"
+
+
+def test_blank_heat_country_does_not_assume_the_united_kingdom():
+    result = calculate_uk_purchased_heat_steam(
+        FakeSession([(_heat(), _dataset())]),
+        country="",
+        energy_form="purchased_heat",
+        quantity=10,
+        unit="kWh",
+        period="2025-01",
+    )
+    assert result["ok"] is False
+    assert result.get("save_allowed") is not True
+    assert result.get("total_t_co2e") is None
+    assert "required" in result["error"].lower()
+
+
+def test_other_country_uses_its_verified_heat_factor_not_desnz():
+    france = _heat(
+        kg_co2e=Decimal("0.112"),
+        attributes={
+            "country": "France",
+            "source_document": "ADEME district heat factor",
+            "publication_year": 2025,
+            "reporting_year": 2025,
+        },
+    )
+    session = FakeSession(
+        [(_heat(), _dataset()), (france, _dataset(publisher="ADEME", code="ademe_heat"))]
+    )
+    result = calculate_uk_purchased_heat_steam(
+        session,
+        country="France",
+        energy_form="purchased_steam",
+        quantity=100,
+        unit="kWh",
+        period="2025-03",
+    )
+    assert result["ok"] is True
+    assert result["factor"]["value"] == "0.11200000"
+    assert result["factor"]["country"] == "France"
+    assert result["total_kg_co2e"] == "11.20000000"
+
+
+def test_missing_heat_factor_is_not_saved():
+    session = FakeSession([(_heat(), _dataset())])
+    try:
+        save_uk_heat_steam_record(
+            session,
+            _ctx(),
+            country="Germany",
+            energy_form="purchased_heat",
+            quantity=Decimal("10"),
+            unit="kWh",
+            period="2025-01",
+            assessment_id=ASSESSMENT_ID,
+        )
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 422
+        assert "factor" in str(exc.detail).lower()
+    else:
+        raise AssertionError("A missing-factor heat result was saved")
+    assert session.added == []
+    assert session.committed is False
 
 
 def test_save_keeps_the_factor_row_and_does_not_use_an_epa_assessment():
