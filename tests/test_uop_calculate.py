@@ -1258,7 +1258,9 @@ def test_unsupported_nested_uop_and_sovereign_are_not_guessed():
             ]
         )
     )
-    assert nested["status"] == "unsupported"
+    # Nested UoP is supported only with child look-through assets — not a collapsed guess.
+    assert nested["status"] in ("incomplete", "unsupported")
+    assert "child" in (nested.get("message") or "").lower() or nested["status"] == "incomplete"
     sovereign = calculate_uop_draft(
         _separate(
             assets=[
@@ -1276,7 +1278,8 @@ def test_unsupported_nested_uop_and_sovereign_are_not_guessed():
             ]
         )
     )
-    assert sovereign["status"] == "unsupported"
+    # Sovereign reuse needs a PCAF option + PPP GDP; no invented collapsed path.
+    assert sovereign["status"] in ("incomplete", "unsupported")
 
 
 def test_ineligible_financing_is_rejected():

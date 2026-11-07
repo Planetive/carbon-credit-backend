@@ -36,6 +36,8 @@ PORTABLE_PG_URL = (
 )
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_0017 = BACKEND_ROOT / "db" / "migrations" / "0017_financed_emissions_reporting_year.sql"
+MIGRATION_0018 = BACKEND_ROOT / "db" / "migrations" / "0018_emission_factor_library.sql"
+IMPORT_005_DESNZ = BACKEND_ROOT / "fastapi_app" / "sql" / "005_scope2_desnz_2026_factor_import.sql"
 
 # Must be set before libpq connects; Windows otherwise hangs in GSS/SSPI.
 os.environ.setdefault("PGGSSENCMODE", "disable")
@@ -320,6 +322,15 @@ def bootstrap_uop_schema(engine: Engine, *, apply_0017: bool) -> None:
         )
     if apply_0017:
         apply_sql_file(engine, MIGRATION_0017)
+
+
+def bootstrap_factor_library(engine: Engine) -> None:
+    apply_sql_file(engine, MIGRATION_0018)
+
+
+def bootstrap_desnz_verified_rows(engine: Engine) -> None:
+    """Load the committed DESNZ 2026 SQL into isolated Postgres. Not production."""
+    apply_sql_file(engine, IMPORT_005_DESNZ)
 
 
 def connect_args() -> dict:

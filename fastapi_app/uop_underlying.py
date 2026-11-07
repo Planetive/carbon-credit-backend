@@ -13,6 +13,16 @@ from typing import Any, Dict, List, Optional, Tuple
 from .calculation_engine import CalculationEngine
 from .finance_models import CompanyType
 from .motor_vehicle_pcaf import compute_motor_vehicle_pcaf_financed
+from .factor_library import (
+    SNAPSHOT_ERRORS,
+    factor_snapshot_from_estimation,
+    require_confirmed_snapshot,
+)
+from .uop_factor_bind import (
+    BIND_ERRORS,
+    resolve_uop_library_factor,
+    unbound_typed_allowed,
+)
 from .shared_formula_utils import (
     calculate_attribution_factor_commercial_real_estate,
     calculate_financed_emissions,
@@ -735,6 +745,63 @@ def _physical_motor_fuel(
     return result
 
 
+def _economic_basis_incomplete(estimation: Dict[str, Any], name: str) -> Optional[Dict[str, str]]:
+    """Currency and price-year are required for economic intensities; electricity/fuel factors are rejected."""
+    unit = _text(
+        _pick(
+            estimation,
+            "factorUnit",
+            "factor_unit",
+            "sectorIntensityUnit",
+            "sector_intensity_unit",
+            "libraryFactorUnit",
+            "library_factor_unit",
+        )
+    ).lower()
+    if unit and any(token in unit for token in ("kwh", "mwh", "litre", "liter", "gallon", "kg fuel")):
+        return {
+            "code": "economic_factor_unit_mismatch",
+            "message": (
+                f"{name}: an electricity or fuel factor cannot be used as an "
+                "economic sector intensity. Use an approved EEIO/sector-intensity "
+                "library factor, or leave the path incomplete."
+            ),
+        }
+    if unbound_typed_allowed():
+        # Formula-unit seam only. Production paths still require approved library rows.
+        return None
+    currency = _text(
+        _pick(
+            estimation,
+            "activityCurrency",
+            "activity_currency",
+            "libraryCurrencyCode",
+            "library_currency_code",
+        )
+    )
+    price_year = _text(_pick(estimation, "priceYear", "price_year", "libraryPriceYear", "library_price_year"))
+    if not currency:
+        return {
+            "code": "missing_economic_currency",
+            "message": f"{name}: economic intensity requires the factor currency (for example PKR or USD).",
+        }
+    if not price_year:
+        return {
+            "code": "missing_economic_price_year",
+            "message": f"{name}: economic intensity requires the factor price year.",
+        }
+    library_id = _text(_pick(estimation, "libraryEntryId", "library_entry_id"))
+    if not library_id or not estimation.get("factorConfirmed"):
+        return {
+            "code": "missing_economic_library_factor",
+            "message": (
+                f"{name}: no approved economic intensity factor is bound. "
+                "Typed EPA/DESNZ energy factors are not substituted for sector intensities."
+            ),
+        }
+    return None
+
+
 def _economic_score5(
     result: Dict[str, Any],
     *,
@@ -745,6 +812,9 @@ def _economic_score5(
 ) -> Dict[str, Any]:
     if asset_class not in SCORE5_ASSET_CLASSES:
         return _unsupported(result, f"{name}: {UNSUPPORTED_SCORE5_MESSAGE}", "unsupported_score5")
+    basis_error = _economic_basis_incomplete(estimation, name)
+    if basis_error:
+        return _incomplete(result, basis_error["code"], basis_error["message"])
     factor = _intensity_tco2e_per_unit(estimation, physical=False)
     weight_pct = _num(_pick(estimation, "sectorAllocationPercent", "sector_allocation_percent"))
     if factor is None or weight_pct is None:
@@ -808,6 +878,9 @@ def _corporate_3a(
             "missing_asset_denominator",
             f"{name}: {denom_label} is required for option 3a attribution.",
         )
+    basis_error = _economic_basis_incomplete(estimation, name)
+    if basis_error:
+        return _incomplete(result, basis_error["code"], basis_error["message"])
     revenue = _num(_pick(estimation, "companyRevenue", "company_revenue"))
     intensity = _num(
         _pick(estimation, "sectorIntensity", "sector_intensity", "emissionFactor", "emission_factor")
@@ -859,6 +932,9 @@ def _corporate_3c(
     denom_ref: str,
     estimation: Dict[str, Any],
 ) -> Dict[str, Any]:
+    basis_error = _economic_basis_incomplete(estimation, name)
+    if basis_error:
+        return _incomplete(result, basis_error["code"], basis_error["message"])
     atr = _num(_pick(estimation, "assetTurnoverRatio", "asset_turnover_ratio"))
     intensity = _num(
         _pick(estimation, "sectorIntensity", "sector_intensity", "emissionFactor", "emission_factor")
@@ -1014,6 +1090,67 @@ def _building_option(
     )
 
 
+def _vehicle_rows(estimation: Dict[str, Any], *, name: str, allocated: float, denom: Optional[float]) -> List[Dict[str, Any]]:
+    raw = _pick(estimation, "vehicles", "vehicleRows", "vehicle_rows")
+    if isinstance(raw, list) and raw:
+        rows: List[Dict[str, Any]] = []
+        for index, item in enumerate(raw):
+            if not isinstance(item, dict):
+                continue
+            vid = _text(_pick(item, "id", "vehicleId", "vehicle_id")) or f"vehicle-{index + 1}"
+            rows.append(
+                {
+                    "id": vid,
+                    "name": _text(_pick(item, "name")) or f"{name} vehicle {index + 1}",
+                    "value_at_origination": _num(
+                        _pick(item, "valueAtOrigination", "value_at_origination", "totalAssetValue")
+                    ),
+                    "outstanding_amount": _num(
+                        _pick(item, "outstandingAmount", "outstanding_amount", "allocatedOutstanding")
+                    ),
+                    "emissions_tco2e": _num(
+                        _pick(item, "emissionsTco2e", "emissions_tco2e", "vehicleEmissions")
+                    ),
+                    "fuel_consumption": _num(_pick(item, "fuelConsumption", "fuel_consumption")),
+                    "distance_traveled": _num(_pick(item, "distanceTraveled", "distance_traveled")),
+                    "efficiency": _num(_pick(item, "efficiency")),
+                    "distance_unit": _text(_pick(item, "distanceUnit", "distance_unit"), default="km"),
+                    "fuel_unit": _text(_pick(item, "fuelUnit", "fuel_unit"), default="litre"),
+                    "geography": _text(_pick(item, "geography", "factorGeography")),
+                }
+            )
+        return rows
+    return [
+        {
+            "id": "vehicle-1",
+            "name": name,
+            "value_at_origination": denom,
+            "outstanding_amount": allocated,
+            "fuel_consumption": _num(
+                _pick(estimation, "fuelConsumption", "fuel_consumption", "physicalActivityAmount")
+            ),
+            "distance_traveled": _num(
+                _pick(estimation, "distanceTraveled", "distance_traveled", "physicalActivityAmount")
+            ),
+            "efficiency": _num(_pick(estimation, "efficiency")),
+            "distance_unit": _text(_pick(estimation, "distanceUnit", "distance_unit"), default="km"),
+            "fuel_unit": _text(_pick(estimation, "fuelUnit", "fuel_unit"), default="litre"),
+            "geography": _text(_pick(estimation, "factorGeography", "factor_geography")),
+        }
+    ]
+
+
+def _reject_gallon_fuel(rows: List[Dict[str, Any]], name: str) -> Optional[str]:
+    for row in rows:
+        unit = _text(row.get("fuel_unit")).lower()
+        if "gallon" in unit or unit in ("gal", "us gal", "uk gal"):
+            return (
+                f"{name}: gallon fuel units are not supported. Convert to litres "
+                "with an evidenced conversion factor, or use a litre-based approved factor."
+            )
+    return None
+
+
 def _motor_option(
     result: Dict[str, Any],
     *,
@@ -1025,6 +1162,85 @@ def _motor_option(
     option: str,
     estimation: Dict[str, Any],
 ) -> Dict[str, Any]:
+    rows = _vehicle_rows(estimation, name=name, allocated=allocated, denom=denom)
+    gallon_error = _reject_gallon_fuel(rows, name)
+    if gallon_error:
+        return _incomplete(result, "unsupported_fuel_unit", gallon_error)
+    if len(rows) > 1:
+        # Multi-vehicle: compute each vehicle's emissions, then reuse validated multi-vehicle AF engine.
+        vehicle_payload: List[Dict[str, Any]] = []
+        factor = _intensity_tco2e_per_unit(estimation, physical=True)
+        if factor is None:
+            return _missing_option_input(
+                result,
+                name,
+                "motor-vehicle options need a published fuel factor. "
+                "EPA values are not substituted automatically.",
+            )
+        for row in rows:
+            value = row.get("value_at_origination")
+            if value is None or value <= 0:
+                return _incomplete(
+                    result,
+                    "missing_vehicle_value",
+                    f"{name}: each vehicle row needs value at origination greater than zero.",
+                )
+            if option == "1a":
+                fuel = row.get("fuel_consumption")
+                if fuel is None:
+                    return _missing_option_input(
+                        result,
+                        name,
+                        f"vehicle '{row['name']}' needs fuel consumption for option 1a.",
+                    )
+                emissions = float(fuel) * float(factor)
+            else:
+                distance = row.get("distance_traveled")
+                efficiency = row.get("efficiency")
+                if distance is None or efficiency is None:
+                    return _missing_option_input(
+                        result,
+                        name,
+                        f"vehicle '{row['name']}' needs distance and efficiency for option {option}.",
+                    )
+                emissions = float(distance) * float(efficiency) * float(factor)
+            vehicle_payload.append(
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "value_at_origination": value,
+                    "outstanding_amount": row.get("outstanding_amount"),
+                    "emissions_tco2e": emissions,
+                }
+            )
+        raw = compute_motor_vehicle_pcaf_financed(allocated, vehicle_payload)
+        fe = float(raw["total_financed_emissions"])
+        total_value = float(raw["total_value_at_origination"] or 0.0)
+        result.update(
+            {
+                "status": COMPLETE,
+                "asset_attribution_factor": (allocated / total_value) if total_value > 0 else None,
+                "denominator": total_value if total_value > 0 else denom,
+                "structure_scope1_tco2e": fe,
+                "structure_scope2_tco2e": None,
+                "structure_scope3_tco2e": None,
+                "structure_unallocated_tco2e": None,
+                "structure_financed_emissions": fe,
+                "data_quality_score": {"1a": 1.0, "1b": 1.0, "2a": 2.0, "2b": 3.0, "3a": 4.0, "3b": 5.0}.get(
+                    option, None
+                ),
+                "option_code": option,
+                "estimated": option not in ("1a", "1b"),
+                "reused_formula_id": "motor-vehicle-pcaf",
+                "reused_methodology": (
+                    f"{denom_ref}; compute_motor_vehicle_pcaf_financed on "
+                    f"{len(vehicle_payload)} independent vehicle rows; option {option}."
+                ),
+                "vehicle_results": raw.get("vehicle_results") or [],
+            }
+        )
+        return result
+
     if denom is None or denom <= 0:
         return _incomplete(
             result,
@@ -1039,9 +1255,7 @@ def _motor_option(
         "emission_factor": factor,
     }
     if option == "1a":
-        fuel = _num(
-            _pick(estimation, "fuelConsumption", "fuel_consumption", "physicalActivityAmount", "physical_activity_amount")
-        )
+        fuel = rows[0].get("fuel_consumption")
         if fuel is None or factor is None:
             return _missing_option_input(
                 result,
@@ -1051,10 +1265,8 @@ def _motor_option(
             )
         inputs["fuel_consumption"] = fuel
     else:
-        distance = _num(
-            _pick(estimation, "distanceTraveled", "distance_traveled", "physicalActivityAmount", "physical_activity_amount")
-        )
-        efficiency = _num(_pick(estimation, "efficiency"))
+        distance = rows[0].get("distance_traveled")
+        efficiency = rows[0].get("efficiency")
         if distance is None or efficiency is None or factor is None:
             return _missing_option_input(
                 result,
@@ -1242,6 +1454,9 @@ def calculate_underlying_asset(
     denom_kind: str,
     denom_label: str,
     denom_ref: str,
+    db: Any = None,
+    organization_id: Any = None,
+    reporting_year: Optional[str] = None,
 ) -> Dict[str, Any]:
     asset_id = _text(_pick(asset, "underlyingAssetId", "underlying_asset_id"))
     name = _text(_pick(asset, "name")) or asset_id or "Underlying asset"
@@ -1287,8 +1502,38 @@ def calculate_underlying_asset(
     estimation = _pick(asset, "estimation", default={}) or {}
     if not isinstance(estimation, dict):
         estimation = {}
+    snapshot_error = require_confirmed_snapshot(estimation)
+    if snapshot_error:
+        incomplete = _incomplete(
+            result,
+            snapshot_error.lower(),
+            f"{name}: {SNAPSHOT_ERRORS.get(snapshot_error, snapshot_error)}",
+        )
+        incomplete["factor_snapshot"] = factor_snapshot_from_estimation(estimation)
+        return incomplete
     method = _text(_pick(estimation, "method"))
     option = _text(_pick(estimation, "pcafOption", "pcaf_option", "optionCode", "option_code"))
+    bind = resolve_uop_library_factor(
+        estimation,
+        db=db,
+        organization_id=organization_id,
+        asset_class=asset_class,
+        option=option,
+        reporting_year=reporting_year,
+    )
+    if not bind.ok:
+        incomplete = _incomplete(
+            result,
+            bind.code.lower(),
+            f"{name}: {BIND_ERRORS.get(bind.code, bind.message)}",
+        )
+        incomplete["factor_snapshot"] = factor_snapshot_from_estimation(estimation)
+        return incomplete
+    if bind.factor is not None:
+        estimation = bind.factor.apply_to_estimation(estimation)
+        result["factor_snapshot"] = bind.factor.snapshot()
+    else:
+        result["factor_snapshot"] = factor_snapshot_from_estimation(estimation)
     source = _text(_pick(estimation, "factorSource", "factor_source", "emissionFactorSource"))
     if not source and not _text(_pick(estimation, "factorDatasetCode", "factor_dataset_code")):
         return _incomplete(
@@ -1552,6 +1797,9 @@ def score5_sector_intensity(assets: List[Dict[str, Any]]) -> Tuple[Optional[floa
         factor = _intensity_tco2e_per_unit(estimation, physical=False)
         pct = _num(_pick(estimation, "sectorAllocationPercent", "sector_allocation_percent"))
         if factor is None or pct is None:
+            continue
+        entry_id = str(estimation.get("libraryEntryId") or estimation.get("library_entry_id") or "").strip()
+        if not entry_id and not unbound_typed_allowed():
             continue
         weighted += (pct / 100.0) * factor
         used += 1

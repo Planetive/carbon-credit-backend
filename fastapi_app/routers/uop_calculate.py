@@ -19,14 +19,17 @@ from .financed_emissions import _persist_financed_row
 from ..uop_calc import UopCalcError, calculate_uop_draft
 from ..uop_calc_schemas import UopCalculateRequest, UopCalculateResponse
 from ..uop_reportable import (
-    PCAF_OVERLAP_REF,
-    assert_no_unresolved_overlap,
     assert_reportable_gates,
     assert_reporting_year_not_overwrite,
     attach_fingerprint,
     parent_inputs,
     persist_fields,
     scan_uop_general_purpose_overlap,
+)
+from ..uop_overlap_review import (
+    assert_overlap_resolved_for_reportable,
+    enrich_overlap_payload,
+    list_overlap_reviews,
 )
 from ..uop_drafts import (
     _assets_for_structure,
@@ -221,7 +224,12 @@ def calculate_uop(
         draft.setdefault("financingInstanceId", investment.financing_instance_id)
 
     try:
-        result = calculate_uop_draft(draft, issuer_level=body.issuer_level)
+        result = calculate_uop_draft(
+            draft,
+            issuer_level=body.issuer_level,
+            db=db,
+            organization_id=ctx.organization_id,
+        )
     except UopCalcError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -253,6 +261,7 @@ def calculate_uop(
         else body.counterparty_id
     )
     overlap_items = []
+    overlap_reviews: list = []
     if instance_id:
         overlap_items = scan_uop_general_purpose_overlap(
             db,
@@ -262,13 +271,13 @@ def calculate_uop(
             financing_instance_id=instance_id,
             issuer_name=issuer_name,
         )
-    result["overlap"] = {
-        "detected": bool(overlap_items),
-        "status": "review_required" if overlap_items else "none",
-        "items": overlap_items,
-        "redistribution": "none",
-        "pcaf_ref": PCAF_OVERLAP_REF,
-    }
+        overlap_reviews = list_overlap_reviews(
+            db,
+            organization_id=ctx.organization_id,
+            financing_instance_id=instance_id,
+            reporting_year=str(reporting_year) if reporting_year else None,
+        )
+    result["overlap"] = enrich_overlap_payload(overlap_items, overlap_reviews)
 
     persist_underlying = body.persist or body.persist_reportable
     persisted = False
@@ -308,7 +317,7 @@ def calculate_uop(
             financing_instance_id=investment.financing_instance_id,
             reporting_year=reporting_year,
         )
-        assert_no_unresolved_overlap(overlap_items)
+        assert_overlap_resolved_for_reportable(overlap_items, overlap_reviews)
         assert_reporting_year_not_overwrite(
             db,
             organization_id=ctx.organization_id,

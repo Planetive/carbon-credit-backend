@@ -18,6 +18,9 @@ from .uop_underlying import (
     calculate_underlying_asset,
     score5_sector_intensity,
 )
+from .uop_nested import calculate_nested_uop_asset
+from .uop_sovereign import calculate_uop_sovereign_asset
+from .uop_sub_sovereign import calculate_uop_sub_sovereign_asset
 
 PCAF_UOP_EQUATIONS = "PCAF Part A 2025, §5.7 Equations to calculate financed emissions"
 PCAF_UOP_ATTRIBUTION = "PCAF Part A 2025, §5.7 Attribution of emissions"
@@ -62,19 +65,26 @@ ASSET_CLASS_DENOMINATOR = {
         "Vehicle value at origination",
         "PCAF §5.6 Outstanding / value at origination",
     ),
-}
-
-UNSUPPORTED_ASSET_CLASSES = {
     "sovereign-debt": (
-        "Sovereign underlying assets require PPP-adjusted GDP attribution "
-        "(PCAF §5.9), which is not collected on the UoP asset form."
+        "ppp_adjusted_gdp",
+        "PPP-adjusted GDP",
+        "PCAF §5.9 Outstanding / PPP-adjusted GDP",
+    ),
+    "sub-sovereign-debt": (
+        "regional_ppp_adjusted_gdp",
+        "Regional PPP-adjusted GDP",
+        "PCAF §5.10 Outstanding / regional PPP-adjusted GDP (AF capped at 1)",
     ),
     "use-of-proceeds": (
-        "Nested Use of Proceeds assets require a full child structure. "
-        "PCAF §5.7 allows a UoP-in-UoP holding, but this engine does not "
-        "guess a collapsed formula."
+        "child_total_capital",
+        "Child structure total capital",
+        "PCAF §5.7 nested look-through (parent allocation / child capital)",
     ),
 }
+
+# Territory-based sub-sovereign is supported with employee-provided regional inputs.
+# Corporate-like sub-sovereign issuers are redirected inside uop_sub_sovereign.
+UNSUPPORTED_ASSET_CLASSES: Dict[str, str] = {}
 
 INCOMPLETE = "incomplete"
 UNSUPPORTED = "unsupported"
@@ -283,7 +293,15 @@ def _asset_class_key(asset: Dict[str, Any]) -> str:
     return _text(_pick(asset, "assetClass", "asset_class"))
 
 
-def _calculate_one_asset(asset: Dict[str, Any]) -> Dict[str, Any]:
+def _calculate_one_asset(
+    asset: Dict[str, Any],
+    *,
+    db: Any = None,
+    organization_id: Any = None,
+    reporting_year: Optional[str] = None,
+    parent_structure_id: Optional[str] = None,
+    visited_nested: Optional[set] = None,
+) -> Dict[str, Any]:
     asset_id = _text(_pick(asset, "underlyingAssetId", "underlying_asset_id"))
     name = _text(_pick(asset, "name")) or asset_id or "Underlying asset"
     asset_class = _asset_class_key(asset)
@@ -299,6 +317,9 @@ def _calculate_one_asset(asset: Dict[str, Any]) -> Dict[str, Any]:
         raise UopCalcError(422, "Each underlying asset requires underlyingAssetId.")
     if allocated is None or allocated < 0:
         raise UopCalcError(422, f"{name}: allocated outstanding is required and cannot be negative.")
+    estimation = _pick(asset, "estimation", default={}) or {}
+    if not isinstance(estimation, dict):
+        estimation = {}
     if asset_class in UNSUPPORTED_ASSET_CLASSES:
         result.update(
             {
@@ -323,11 +344,59 @@ def _calculate_one_asset(asset: Dict[str, Any]) -> Dict[str, Any]:
 
     denom_kind, denom_label, denom_ref = ASSET_CLASS_DENOMINATOR[asset_class]
     try:
+        if asset_class == "sovereign-debt":
+            return calculate_uop_sovereign_asset(
+                result,
+                asset=asset,
+                estimation=estimation,
+                allocated=float(allocated or 0.0),
+                name=name,
+                db=db,
+            )
+        if asset_class == "sub-sovereign-debt":
+            return calculate_uop_sub_sovereign_asset(
+                result,
+                asset=asset,
+                estimation=estimation,
+                allocated=float(allocated or 0.0),
+                name=name,
+            )
+        if asset_class == "use-of-proceeds":
+            parent_identity = (
+                _text(_pick(asset, "parentStructureId", "parent_structure_id"))
+                or _text(parent_structure_id)
+                or name
+            )
+
+            def _child_calc(child_asset, **kwargs):
+                return _calculate_one_asset(
+                    child_asset,
+                    parent_structure_id=parent_identity,
+                    visited_nested=kwargs.pop("visited_nested", visited_nested),
+                    **kwargs,
+                )
+
+            return calculate_nested_uop_asset(
+                result,
+                asset=asset,
+                estimation=estimation,
+                allocated=float(allocated or 0.0),
+                name=name,
+                parent_identity=parent_identity,
+                visited=visited_nested,
+                calculate_child_asset=_child_calc,
+                db=db,
+                organization_id=organization_id,
+                reporting_year=reporting_year,
+            )
         return calculate_underlying_asset(
             asset,
             denom_kind=denom_kind,
             denom_label=denom_label,
             denom_ref=denom_ref,
+            db=db,
+            organization_id=organization_id,
+            reporting_year=reporting_year,
         )
     except UnderlyingInputError as exc:
         raise UopCalcError(exc.status_code, exc.detail) from exc
@@ -595,6 +664,8 @@ def calculate_uop_draft(
     draft: Dict[str, Any],
     *,
     issuer_level: Optional[Dict[str, Any]] = None,
+    db: Any = None,
+    organization_id: Any = None,
 ) -> Dict[str, Any]:
     outcome = resolve_uop_accounting(_pick(draft, "eligibility", default={}) or {})
     if not uop_qualifies(outcome):
@@ -728,7 +799,21 @@ def calculate_uop_draft(
         }
         return _wrap(classification, path, investor, computed, outcome)
 
-    asset_rows = [_calculate_one_asset(item) for item in assets_in]
+    reporting_year = _text(_pick(draft, "reportingYear", "reporting_year")) or None
+    parent_structure_id = _text(
+        _pick(draft, "financingInstanceId", "financing_instance_id", "structureId", "structure_id")
+    ) or None
+    asset_rows = [
+        _calculate_one_asset(
+            item,
+            db=db,
+            organization_id=organization_id,
+            reporting_year=reporting_year,
+            parent_structure_id=parent_structure_id,
+            visited_nested={parent_structure_id} if parent_structure_id else set(),
+        )
+        for item in assets_in
+    ]
     blocked = [row for row in asset_rows if row.get("status") == UNSUPPORTED]
     incomplete = [row for row in asset_rows if row.get("status") == INCOMPLETE]
     if blocked:
