@@ -29,6 +29,7 @@ from ..financing_instance import (
     year_aware_identity_available,
 )
 from ..uop_drafts import is_uop_formula_id, uop_reportable_blocked_detail
+from ..ssp_drafts import is_ssp_formula_id, ssp_reportable_blocked_detail
 from ..ghg_models import FinancedEmission
 from ..ppp_gdp import apply_ppp_resolution, is_sovereign_formula
 from ..schemas_v1 import (
@@ -286,6 +287,11 @@ def create_financed_emission(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=uop_reportable_blocked_detail(),
         )
+    if is_ssp_formula_id(body.formula_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ssp_reportable_blocked_detail(),
+        )
     return _persist_financed_row(
         db,
         organization_id=ctx.organization_id,
@@ -327,6 +333,11 @@ def calculate_and_persist(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=uop_reportable_blocked_detail(),
+        )
+    if is_ssp_formula_id(body.formula_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ssp_reportable_blocked_detail(),
         )
     company_type = (
         CompanyType.LISTED

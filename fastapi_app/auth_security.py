@@ -29,11 +29,30 @@ def _require_jwt_secret() -> str:
 
 
 def hash_password(plain_password: str) -> str:
-    return pwd_context.hash(plain_password)
+    try:
+        return pwd_context.hash(plain_password)
+    except Exception:
+        # passlib↔bcrypt version skew on some Python builds
+        import bcrypt
+
+        return bcrypt.hashpw(
+            plain_password.encode("utf-8"), bcrypt.gensalt()
+        ).decode("utf-8")
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
-    return pwd_context.verify(plain_password, password_hash)
+    try:
+        return pwd_context.verify(plain_password, password_hash)
+    except Exception:
+        import bcrypt
+
+        try:
+            return bcrypt.checkpw(
+                plain_password.encode("utf-8"),
+                password_hash.encode("utf-8"),
+            )
+        except Exception:
+            return False
 
 
 def create_access_token(

@@ -37,6 +37,8 @@ PORTABLE_PG_URL = (
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_0017 = BACKEND_ROOT / "db" / "migrations" / "0017_financed_emissions_reporting_year.sql"
 MIGRATION_0018 = BACKEND_ROOT / "db" / "migrations" / "0018_emission_factor_library.sql"
+MIGRATION_0019 = BACKEND_ROOT / "db" / "migrations" / "0019_uop_overlap_reviews.sql"
+MIGRATION_0020 = BACKEND_ROOT / "db" / "migrations" / "0020_ssp_structures.sql"
 IMPORT_005_DESNZ = BACKEND_ROOT / "fastapi_app" / "sql" / "005_scope2_desnz_2026_factor_import.sql"
 
 # Must be set before libpq connects; Windows otherwise hangs in GSS/SSPI.
@@ -227,6 +229,7 @@ def _sql_statements(script: str) -> list[str]:
     buf: list[str] = []
     i = 0
     dollar: Optional[str] = None
+    in_single = False
     while i < len(script):
         if dollar:
             end = script.find(dollar, i)
@@ -237,17 +240,32 @@ def _sql_statements(script: str) -> list[str]:
             i = end + len(dollar)
             dollar = None
             continue
-        if script.startswith("--", i):
+        if not in_single and script.startswith("--", i):
             newline = script.find("\n", i)
             i = len(script) if newline < 0 else newline + 1
             continue
-        if script.startswith("$$", i):
+        if not in_single and script.startswith("$$", i):
             dollar = "$$"
             buf.append("$$")
             i += 2
             continue
         char = script[i]
-        if char == ";":
+        if char == "'" and not in_single:
+            in_single = True
+            buf.append(char)
+            i += 1
+            continue
+        if char == "'" and in_single:
+            # SQL escaped quote ''
+            if i + 1 < len(script) and script[i + 1] == "'":
+                buf.append("''")
+                i += 2
+                continue
+            in_single = False
+            buf.append(char)
+            i += 1
+            continue
+        if char == ";" and not in_single:
             stmt = "".join(buf).strip()
             if stmt and stmt.upper() not in {"BEGIN", "COMMIT"}:
                 statements.append(stmt)
@@ -326,6 +344,175 @@ def bootstrap_uop_schema(engine: Engine, *, apply_0017: bool) -> None:
 
 def bootstrap_factor_library(engine: Engine) -> None:
     apply_sql_file(engine, MIGRATION_0018)
+
+
+def _bootstrap_ssp_prerequisites(engine: Engine) -> None:
+    """Shared stubs required before applying 0020. Never touches production."""
+    with engine.begin() as conn:
+        conn.execute(text("CREATE SCHEMA IF NOT EXISTS app"))
+        conn.execute(text("CREATE SCHEMA IF NOT EXISTS public"))
+        conn.execute(text('CREATE EXTENSION IF NOT EXISTS "pgcrypto"'))
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS public.organizations (
+                  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                  name text NOT NULL DEFAULT 'test-org',
+                  parent_organization_id uuid,
+                  description text,
+                  created_at timestamptz NOT NULL DEFAULT now(),
+                  updated_at timestamptz NOT NULL DEFAULT now(),
+                  created_by uuid,
+                  is_active boolean NOT NULL DEFAULT true,
+                  is_original boolean NOT NULL DEFAULT false
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS public.counterparties (
+                  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                  user_id uuid,
+                  organization_id uuid REFERENCES public.organizations (id),
+                  name text NOT NULL DEFAULT '',
+                  sector text,
+                  geography text,
+                  counterparty_type text,
+                  created_at timestamptz NOT NULL DEFAULT now(),
+                  updated_at timestamptz NOT NULL DEFAULT now()
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS public.exposures (
+                  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                  user_id uuid,
+                  organization_id uuid REFERENCES public.organizations (id),
+                  counterparty_id uuid REFERENCES public.counterparties (id),
+                  exposure_id text,
+                  name text NOT NULL DEFAULT '',
+                  amount_pkr numeric(20, 8),
+                  probability_of_default numeric(20, 8),
+                  loss_given_default numeric(20, 8),
+                  tenor_months integer,
+                  created_at timestamptz NOT NULL DEFAULT now(),
+                  updated_at timestamptz NOT NULL DEFAULT now()
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS public.schema_migrations (
+                  version text PRIMARY KEY,
+                  description text,
+                  applied_at timestamptz NOT NULL DEFAULT now()
+                )
+                """
+            )
+        )
+        # 0020 only requires financed_emissions to exist; create a minimal stub.
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS app.financed_emissions (
+                  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                  organization_id uuid NOT NULL,
+                  user_id uuid,
+                  counterparty_id uuid,
+                  exposure_id uuid,
+                  questionnaire_id uuid,
+                  calc_kind text NOT NULL DEFAULT 'finance',
+                  company_type text,
+                  formula_id text,
+                  formula_name text,
+                  inputs jsonb NOT NULL DEFAULT '{}'::jsonb,
+                  results jsonb NOT NULL DEFAULT '{}'::jsonb,
+                  financed_emissions numeric(20, 6),
+                  attribution_factor numeric(20, 8),
+                  data_quality_score numeric(10, 4),
+                  status text NOT NULL DEFAULT 'draft',
+                  created_at timestamptz NOT NULL DEFAULT now(),
+                  updated_at timestamptz NOT NULL DEFAULT now()
+                )
+                """
+            )
+        )
+
+
+def bootstrap_ssp_schema(engine: Engine) -> None:
+    """
+    Isolated prerequisites + apply prepared 0020_ssp_structures.sql.
+    Never touches production. Does not apply 0019 (independent of SSP).
+    """
+    _bootstrap_ssp_prerequisites(engine)
+    apply_sql_file(engine, MIGRATION_0020)
+
+
+def bootstrap_ssp_fullstack_schema(engine: Engine) -> None:
+    """
+    Phase 6B.4: SSP schema + JWT auth/membership tables for real browser login.
+    Still disposable / loopback-only. Never apply to staging or production.
+    """
+    bootstrap_ssp_schema(engine)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS public.users (
+                  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                  email text NOT NULL UNIQUE,
+                  password_hash text NOT NULL,
+                  email_confirmed boolean NOT NULL DEFAULT true,
+                  created_at timestamptz NOT NULL DEFAULT now(),
+                  updated_at timestamptz NOT NULL DEFAULT now()
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS public.profiles (
+                  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                  user_id uuid NOT NULL UNIQUE REFERENCES public.users (id) ON DELETE CASCADE,
+                  organization_name text,
+                  display_name text NOT NULL,
+                  phone text,
+                  user_type text DEFAULT 'financial_institution',
+                  current_organization_id uuid REFERENCES public.organizations (id) ON DELETE SET NULL,
+                  created_at timestamptz NOT NULL DEFAULT now(),
+                  updated_at timestamptz NOT NULL DEFAULT now()
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS public.user_organizations (
+                  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                  user_id uuid NOT NULL,
+                  organization_id uuid NOT NULL REFERENCES public.organizations (id) ON DELETE CASCADE,
+                  role text NOT NULL DEFAULT 'viewer',
+                  status text DEFAULT 'active',
+                  created_at timestamptz NOT NULL DEFAULT now()
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_user_organizations_user_id "
+                "ON public.user_organizations (user_id)"
+            )
+        )
 
 
 def bootstrap_desnz_verified_rows(engine: Engine) -> None:

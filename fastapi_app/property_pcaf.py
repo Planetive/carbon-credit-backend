@@ -50,6 +50,9 @@ def run_property_loan_calculation(
     inputs: Dict[str, Any],
     company_type: str,
 ) -> Dict[str, Any]:
+    # Import locally to avoid circular import with absolute_emissions → property_pcaf.
+    from .absolute_emissions import AbsoluteEmissionsError, absolute_building_emissions_tco2e
+
     inputs = normalize_property_field_aliases(inputs)
     outstanding = _num(inputs.get("outstanding_amount"))
     property_value = _num(inputs.get("property_value_at_origination"))
@@ -74,18 +77,18 @@ def run_property_loan_calculation(
         ),
     ]
 
-    total_emissions = 0.0
+    try:
+        abs_res = absolute_building_emissions_tco2e(option_code, inputs)
+    except AbsoluteEmissionsError as exc:
+        raise ValueError(exc.message) from exc
+
+    total_emissions = float(abs_res["absolute_total_tco2e"])
     formula_note = ""
     meta_extra: Dict[str, Any] = {}
+    energy = _num(inputs.get("energy_consumption"))
+    ef = _num(inputs.get("emission_factor") or inputs.get("average_emission_factor"))
 
     if option_code in ("1a", "1b"):
-        energy = _num(inputs.get("energy_consumption"))
-        ef = _num(inputs.get("emission_factor") or inputs.get("average_emission_factor"))
-        if energy <= 0 or ef <= 0:
-            raise ValueError(
-                "Actual energy consumption and emission factor must be greater than 0"
-            )
-        total_emissions = energy * ef
         steps.append(
             CalculationStep(
                 step="Building energy emissions",
@@ -98,17 +101,10 @@ def run_property_loan_calculation(
             if option_code == "1a"
             else "Σ (Outstanding / Property value) × Actual energy × Average grid EF"
         )
-
     elif option_code == "2a":
         intensity = _num(inputs.get("estimated_energy_consumption_from_labels"))
         floor_area = _num(inputs.get("floor_area"))
-        ef = _num(inputs.get("average_emission_factor") or inputs.get("emission_factor"))
-        if intensity <= 0 or floor_area <= 0 or ef <= 0:
-            raise ValueError(
-                "Energy from labels, floor area, and average emission factor must be greater than 0"
-            )
         total_energy = intensity * floor_area
-        total_emissions = total_energy * ef
         steps.append(
             CalculationStep(
                 step="Total Energy Consumption",
@@ -135,17 +131,10 @@ def run_property_loan_calculation(
             "floorArea": floor_area,
             "totalEnergyConsumption": total_energy,
         }
-
     elif option_code == "2b":
         intensity = _num(inputs.get("estimated_energy_consumption_from_statistics"))
         floor_area = _num(inputs.get("floor_area"))
-        ef = _num(inputs.get("average_emission_factor") or inputs.get("emission_factor"))
-        if intensity <= 0 or floor_area <= 0 or ef <= 0:
-            raise ValueError(
-                "Energy from statistics, floor area, and average emission factor must be greater than 0"
-            )
         total_energy = intensity * floor_area
-        total_emissions = total_energy * ef
         steps.append(
             CalculationStep(
                 step="Total Energy Consumption",
@@ -171,17 +160,10 @@ def run_property_loan_calculation(
             "floorArea": floor_area,
             "totalEnergyConsumption": total_energy,
         }
-
     elif option_code == "3":
         per_building = _num(inputs.get("estimated_energy_consumption_from_statistics"))
         buildings = _num(inputs.get("number_of_buildings"))
-        ef = _num(inputs.get("average_emission_factor") or inputs.get("emission_factor"))
-        if per_building <= 0 or buildings <= 0 or ef <= 0:
-            raise ValueError(
-                "Statistics energy, number of buildings, and average emission factor must be greater than 0"
-            )
         total_energy = per_building * buildings
-        total_emissions = total_energy * ef
         steps.append(
             CalculationStep(
                 step="Total Energy Consumption",
@@ -208,7 +190,6 @@ def run_property_loan_calculation(
             "numberOfBuildings": buildings,
             "totalEnergyConsumption": total_energy,
         }
-
     else:
         raise ValueError(f"Unsupported property loan option: {option_code}")
 

@@ -36,6 +36,8 @@ from .routers.financed_emissions import router as financed_emissions_router
 from .routers.uop_drafts import router as uop_drafts_router
 from .routers.uop_calculate import router as uop_calculate_router
 from .routers.uop_overlap_reviews import router as uop_overlap_reviews_router
+from .routers.ssp_drafts import router as ssp_drafts_router
+from .routers.ssp_calculate import router as ssp_calculate_router
 from .routers.catalog import router as catalog_router
 from .routers.factors import router as factors_router
 from .routers.factor_library import router as factor_library_router
@@ -72,6 +74,8 @@ app.include_router(financed_emissions_router, prefix="/api/v1")
 app.include_router(uop_drafts_router, prefix="/api/v1")
 app.include_router(uop_calculate_router, prefix="/api/v1")
 app.include_router(uop_overlap_reviews_router, prefix="/api/v1")
+app.include_router(ssp_drafts_router, prefix="/api/v1")
+app.include_router(ssp_calculate_router, prefix="/api/v1")
 app.include_router(catalog_router, prefix="/api/v1")
 app.include_router(factors_router, prefix="/api/v1")
 app.include_router(factor_library_router, prefix="/api/v1")

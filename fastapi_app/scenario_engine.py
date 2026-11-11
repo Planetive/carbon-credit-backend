@@ -334,14 +334,45 @@ class ScenarioEngine:
     
     def get_sector_multipliers(self, sector: str) -> Dict[str, float]:
         """
-        Get multipliers for a given sector
-        Returns default values if sector not found
+        Get multipliers for a given sector.
+        Normalizes common bank-portfolio labels onto the stress-test key set.
+        Unknown sectors fall back to "Other" (mild stress), not identity 1.0/0.
         """
-        return self.sector_multipliers.get(sector, {
-            "transition_pd_multiplier": 1.0,
-            "physical_pd_multiplier": 1.0,
-            "lgd_change": 0.0
-        })
+        raw = (sector or "").strip()
+        if not raw or raw.upper() in {"N/A", "NA", "NONE", "UNDEFINED"}:
+            raw = "Other"
+
+        aliases = {
+            "oil & gas": "Oil & Gas (Upstream, Midstream, Downstream)",
+            "oil and gas": "Oil & Gas (Upstream, Midstream, Downstream)",
+            "oil/gas": "Oil & Gas (Upstream, Midstream, Downstream)",
+            "energy": "Power Generation (Fossil Fuel-Based)",
+            "power": "Power Generation (Fossil Fuel-Based)",
+            "utilities": "Power Generation (Fossil Fuel-Based)",
+            "real estate": "Real Estate",
+            "property": "Real Estate",
+            "banking": "Financial Services",
+            "banks": "Financial Services",
+            "financials": "Financial Services",
+            "finance": "Financial Services",
+            "transport": "Transportation",
+            "automotive": "Transportation",
+            "auto": "Transportation",
+            "construction & engineering": "Construction",
+            "health care": "Healthcare",
+            "health": "Healthcare",
+        }
+        key = aliases.get(raw.lower(), raw)
+        if key not in self.sector_multipliers:
+            # Case-insensitive exact match against known keys
+            lowered = {k.lower(): k for k in self.sector_multipliers}
+            key = lowered.get(raw.lower()) or lowered.get(key.lower()) or "Other"
+
+        return self.sector_multipliers.get(key, self.sector_multipliers.get("Other", {
+            "transition_pd_multiplier": 1.1,
+            "physical_pd_multiplier": 1.1,
+            "lgd_change": 5.0,
+        }))
     
     def calculate_scenario(self, portfolio_entries: List[PortfolioEntry], scenario_type: str) -> ScenarioResponse:
         """
