@@ -130,7 +130,8 @@ def calculate_ssp(
         if body.expected_holding_updated_at is not None:
             _check_holding_lock(holding, body.expected_holding_updated_at)
         if body.expected_deal_updated_at is not None:
-            _check_deal_lock(deal, body.expected_deal_updated_at)
+            siblings = [row for row in graph.holdings if row.id != holding.id]
+            _check_deal_lock(deal, body.expected_deal_updated_at, siblings=siblings)
     elif body.holding_id:
         holding = get_org_holding(db, ctx.organization_id, body.holding_id)
         if holding is None:
@@ -141,13 +142,15 @@ def calculate_ssp(
         if body.expected_holding_updated_at is not None:
             _check_holding_lock(holding, body.expected_holding_updated_at)
         if body.expected_deal_updated_at is not None:
-            _check_deal_lock(deal, body.expected_deal_updated_at)
+            siblings = [row for row in graph.holdings if row.id != holding.id]
+            _check_deal_lock(deal, body.expected_deal_updated_at, siblings=siblings)
     elif body.deal_id:
         deal = get_org_deal(db, ctx.organization_id, body.deal_id)
         if deal is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SSP deal not found")
         if body.expected_deal_updated_at is not None:
-            _check_deal_lock(deal, body.expected_deal_updated_at)
+            graph = _load_graph(db, ctx.organization_id, deal.id)
+            _check_deal_lock(deal, body.expected_deal_updated_at, siblings=graph.holdings)
 
     draft = _merge_draft(stored_draft, body.draft)
     if not draft:
