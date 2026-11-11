@@ -118,8 +118,8 @@ def calculate_ssp(
     if body.financing_instance_id:
         holding = find_holding_by_instance(
             db,
-            ctx.organization_id,
-            body.financing_instance_id,
+            organization_id=ctx.organization_id,
+            financing_instance_id=body.financing_instance_id,
             counterparty_id=body.counterparty_id,
         )
         if holding is None:
